@@ -4,74 +4,20 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import {
   ArrowRight,
-  FolderKanban,
-  Image as ImageIcon,
-  Layers3,
-  Cpu,
+  CheckCircle2,
   Zap,
   GitBranch,
-  Download,
-  Activity,
-  CheckCircle2,
-  Clock,
-  TrendingUp,
-  Package,
 } from "lucide-react";
 
 import { AppFrame } from "@/components/layout/app-frame";
 import { ProjectCreateForm } from "@/components/projects/project-create-form";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { t } from "@/i18n";
 import { useAppPreferencesStore } from "@/store/app-preferences";
 
-const stagger = {
-  initial: { opacity: 0, y: 16 },
-  animate: { opacity: 1, y: 0 },
-};
-
 export function DashboardView() {
   const language = useAppPreferencesStore((state) => state.language);
-
-  const metrics = [
-    {
-      icon: FolderKanban,
-      label: t("dashboard.metricLiveProjects", language),
-      value: "Projects",
-      meta: t("dashboard.metricLiveProjectsMeta", language),
-      color: "text-blue-400",
-      bg: "bg-blue-500/10 border-blue-500/20",
-    },
-    {
-      icon: Cpu,
-      label: t("dashboard.metricGenerationReadiness", language),
-      value: "OpenAI / Mock",
-      meta: t("dashboard.metricGenerationReadinessMeta", language),
-      color: "text-violet-400",
-      bg: "bg-violet-500/10 border-violet-500/20",
-    },
-    {
-      icon: Download,
-      label: t("dashboard.metricExportTargets", language),
-      value: "PNG · JPG · WEBP",
-      meta: t("dashboard.metricExportTargetsMeta", language),
-      color: "text-emerald-400",
-      bg: "bg-emerald-500/10 border-emerald-500/20",
-    },
-  ];
-
-  const phases = [
-    { icon: FolderKanban, label: t("dashboard.coverageProjects", language) },
-    { icon: Layers3, label: t("dashboard.coveragePrompt", language) },
-    { icon: ImageIcon, label: t("dashboard.coverageExport", language) },
-  ];
-
-  const activityItems = [
-    { icon: Activity, label: t("dashboard.activityProjects", language), tone: "blue" },
-    { icon: Zap, label: t("dashboard.activityGeneration", language), tone: "violet" },
-    { icon: Download, label: t("dashboard.activityExport", language), tone: "emerald" },
-  ];
 
   return (
     <AppFrame eyebrow={t("common.appEyebrow", language)} title="Render2Real Pro">
@@ -143,108 +89,6 @@ export function DashboardView() {
           </div>
         </motion.section>
 
-        {/* ── METRICS ROW ──────────────────────────────────────────────────── */}
-        <section className="grid gap-4 lg:grid-cols-3">
-          {metrics.map((metric, i) => {
-            const Icon = metric.icon;
-            return (
-              <motion.div
-                key={metric.label}
-                {...stagger}
-                transition={{ duration: 0.4, delay: i * 0.07 }}
-              >
-                <Card className="surface-panel min-h-32 rounded-[24px]">
-                  <CardHeader className="gap-3 pb-2">
-                    <div className="flex items-center justify-between">
-                      <div className={`flex size-9 items-center justify-center rounded-[14px] border ${metric.bg}`}>
-                        <Icon className={`size-4 ${metric.color}`} />
-                      </div>
-                      <TrendingUp className="size-3.5 text-zinc-600" />
-                    </div>
-                    <div>
-                      <CardDescription className="text-[0.68rem] uppercase tracking-[0.18em] text-zinc-500">
-                        {metric.label}
-                      </CardDescription>
-                      <CardTitle className={`mt-1 font-mono text-2xl font-semibold tracking-tight ${metric.color}`}>
-                        {metric.value}
-                      </CardTitle>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="pt-0 text-xs text-zinc-500">{metric.meta}</CardContent>
-                </Card>
-              </motion.div>
-            );
-          })}
-        </section>
-
-        {/* ── PHASE COVERAGE + ACTIVITY ────────────────────────────────────── */}
-        <section className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-
-          <motion.div {...stagger} transition={{ duration: 0.4, delay: 0.25 }}>
-            <Card className="surface-panel rounded-[28px]">
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <Package className="size-4 text-blue-400" />
-                  <CardTitle>{t("dashboard.phaseCoverage", language)}</CardTitle>
-                </div>
-                <CardDescription>{t("dashboard.phaseDescription", language)}</CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-3">
-                {phases.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <div
-                      key={item.label}
-                      className="flex items-center gap-3 rounded-[20px] border border-white/8 bg-white/3 px-4 py-3.5 transition hover:bg-white/5"
-                    >
-                      <div className="flex size-10 items-center justify-center rounded-[16px] border border-blue-500/20 bg-blue-500/10">
-                        <Icon className="size-4 text-blue-400" />
-                      </div>
-                      <span className="flex-1 text-sm text-zinc-200">{item.label}</span>
-                      <div className="flex size-5 items-center justify-center rounded-full bg-emerald-500/15">
-                        <CheckCircle2 className="size-3 text-emerald-400" />
-                      </div>
-                    </div>
-                  );
-                })}
-              </CardContent>
-            </Card>
-          </motion.div>
-
-          <motion.div {...stagger} transition={{ duration: 0.4, delay: 0.32 }}>
-            <Card className="surface-panel rounded-[28px]">
-              <CardHeader>
-                <div className="flex items-center gap-2">
-                  <Clock className="size-4 text-zinc-400" />
-                  <CardTitle>{t("dashboard.activityTitle", language)}</CardTitle>
-                </div>
-                <CardDescription>{t("dashboard.activityDescription", language)}</CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-3">
-                {activityItems.map((item) => {
-                  const Icon = item.icon;
-                  const colorMap: Record<string, string> = {
-                    blue: "bg-blue-500/10 border-blue-500/20 text-blue-400",
-                    violet: "bg-violet-500/10 border-violet-500/20 text-violet-400",
-                    emerald: "bg-emerald-500/10 border-emerald-500/20 text-emerald-400",
-                  };
-                  const colors = colorMap[item.tone] ?? colorMap.blue;
-                  return (
-                    <div
-                      key={item.label}
-                      className="flex items-start gap-3 rounded-[20px] border border-white/8 bg-white/3 px-4 py-3.5"
-                    >
-                      <div className={`mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-[10px] border ${colors}`}>
-                        <Icon className="size-3.5" />
-                      </div>
-                      <p className="text-sm leading-6 text-zinc-300">{item.label}</p>
-                    </div>
-                  );
-                })}
-              </CardContent>
-            </Card>
-          </motion.div>
-        </section>
       </div>
     </AppFrame>
   );

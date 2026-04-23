@@ -6,10 +6,8 @@ import {
   FolderKanban,
   Languages,
   LayoutGrid,
-  Moon,
   Settings2,
   ShieldUser,
-  Sun,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -52,8 +50,6 @@ export function AppFrame({
   const router = useRouter();
   const language = useAppPreferencesStore((state) => state.language);
   const setLanguage = useAppPreferencesStore((state) => state.setLanguage);
-  const theme = useAppPreferencesStore((state) => state.theme);
-  const toggleTheme = useAppPreferencesStore((state) => state.toggleTheme);
   const isAppRoute = pathname.startsWith("/app");
 
   const { data: session, isLoading: sessionLoading } = useQuery({
@@ -122,30 +118,6 @@ export function AppFrame({
               })}
             </nav>
 
-            <Select value={language} onValueChange={(value) => setLanguage(value as Language)}>
-              <SelectTrigger size="sm" className="min-w-28">
-                <Languages data-icon="inline-start" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent align="end">
-                <SelectGroup>
-                  <SelectItem value="hu">Magyar</SelectItem>
-                  <SelectItem value="en">English</SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-
-            <Button
-              variant="outline"
-              size="sm"
-              type="button"
-              onClick={toggleTheme}
-              aria-label="Toggle theme"
-            >
-              {theme === "dark" ? <Moon data-icon="inline-start" /> : <Sun data-icon="inline-start" />}
-              {theme === "dark" ? t("common.dark", language) : t("common.light", language)}
-            </Button>
-
             {isAppRoute && session?.profile ? (
               <>
                 <div className="surface-chip hidden items-center gap-2 rounded-full px-3 py-1.5 text-xs text-muted-foreground md:flex">
@@ -159,6 +131,18 @@ export function AppFrame({
                 </Button>
               </>
             ) : null}
+            <Select value={language} onValueChange={(value) => setLanguage(value as Language)}>
+              <SelectTrigger size="sm" className="min-w-28">
+                <Languages data-icon="inline-start" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                <SelectGroup>
+                  <SelectItem value="hu">Magyar</SelectItem>
+                  <SelectItem value="en">English</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
           </div>
         </div>
       </header>

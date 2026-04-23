@@ -7,21 +7,18 @@ import {
   ArrowRight,
   ChevronUp,
   Languages,
-  Moon,
-  Sun,
   ShieldCheck,
   Layers,
   Zap,
   Lock,
   BarChart3,
-  Cpu,
   GitBranch,
   Download,
   Eye,
   CheckCircle2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -494,8 +491,6 @@ export function getPricingHighlightTier() {
 export function LandingView() {
   const language = useAppPreferencesStore((state) => state.language);
   const setLanguage = useAppPreferencesStore((state) => state.setLanguage);
-  const theme = useAppPreferencesStore((state) => state.theme);
-  const toggleTheme = useAppPreferencesStore((state) => state.toggleTheme);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const copy = content[language];
 
@@ -511,18 +506,13 @@ export function LandingView() {
       {/* ── NAV ─────────────────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-40 border-b border-white/8 bg-background/75 backdrop-blur-xl">
         <div className="mx-auto flex w-full max-w-[1680px] items-center justify-between gap-4 px-6 py-3.5">
-          <div className="flex items-center gap-3">
-            <div className="flex size-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 shadow-lg shadow-blue-500/25">
-              <Cpu className="size-4 text-white" />
+          <div className="flex items-center gap-2.5">
+            <div className="relative size-9 overflow-hidden rounded-xl">
+              <Image src="/logo.png" alt="Render2Real Pro" fill unoptimized className="object-cover" />
             </div>
-            <div className="flex flex-col leading-none">
-              <span className="text-[0.6rem] uppercase tracking-[0.28em] text-muted-foreground">
-                M Mérnöki Iroda Kft.
-              </span>
-              <span className="font-heading text-[0.95rem] font-semibold tracking-tight">
-                Render2Real Pro
-              </span>
-            </div>
+            <span className="font-heading text-[0.95rem] font-semibold tracking-tight">
+              Render2Real Pro
+            </span>
           </div>
 
           <nav className="hidden items-center gap-6 text-sm text-muted-foreground xl:flex">
@@ -540,6 +530,13 @@ export function LandingView() {
           </nav>
 
           <div className="flex items-center gap-2">
+            <Link href="/login" className={buttonVariants({ variant: "ghost", size: "sm" })}>
+              {copy.nav.signIn}
+            </Link>
+            <Link href="/register" className={buttonVariants({ variant: "default", size: "sm" })}>
+              {language === "hu" ? "Ingyenes fiók létrehozása" : "Create free account"}
+              <ArrowRight data-icon="inline-end" />
+            </Link>
             <Select value={language} onValueChange={(value) => setLanguage(value as "hu" | "en")}>
               <SelectTrigger size="sm" className="min-w-28">
                 <Languages data-icon="inline-start" />
@@ -552,19 +549,6 @@ export function LandingView() {
                 </SelectGroup>
               </SelectContent>
             </Select>
-
-            <Button variant="outline" size="sm" type="button" onClick={toggleTheme}>
-              {theme === "dark" ? <Moon data-icon="inline-start" /> : <Sun data-icon="inline-start" />}
-              {theme === "dark" ? "Dark" : "Light"}
-            </Button>
-
-            <Link href="/login" className={buttonVariants({ variant: "ghost", size: "sm" })}>
-              {copy.nav.signIn}
-            </Link>
-            <Link href="/register" className={buttonVariants({ variant: "default", size: "sm" })}>
-              {copy.nav.create}
-              <ArrowRight data-icon="inline-end" />
-            </Link>
           </div>
         </div>
       </header>
@@ -668,15 +652,26 @@ export function LandingView() {
           {/* ── INTEGRATIONS ──────────────────────────────────────────────── */}
           <motion.section {...reveal} className="text-center">
             <p className="text-sm text-muted-foreground">{copy.integrations.title}</p>
-            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-              {copy.integrations.items.map((item) => (
-                <span
-                  key={item}
-                  className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-zinc-300"
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-6">
+              {[
+                { src: "/logos/revit.png", alt: "Autodesk Revit" },
+                { src: "/logos/archicad.png", alt: "Graphisoft Archicad" },
+                { src: "/logos/sketchup.jpg", alt: "SketchUp" },
+                { src: "/logos/3dsmax.png", alt: "Autodesk 3ds Max" },
+                { src: "/logos/blender.png", alt: "Blender" },
+              ].map((logo) => (
+                <div
+                  key={logo.alt}
+                  className="flex h-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-5 py-2 transition hover:bg-white/10"
                 >
-                  {item}
-                </span>
+                  <div className="relative h-7 w-24">
+                    <Image src={logo.src} alt={logo.alt} fill unoptimized className="object-contain" />
+                  </div>
+                </div>
               ))}
+              <div className="flex h-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 px-5 py-2 text-sm font-medium text-zinc-300">
+                REST API
+              </div>
             </div>
           </motion.section>
 
@@ -807,6 +802,7 @@ export function LandingView() {
                 afterLabel={copy.comparison.after}
               />
             </div>
+            <p className="mt-4 text-center text-xs text-zinc-600">{language === "hu" ? "Húzza a csúszkát az összehasonlításhoz" : "Drag the slider to compare"}</p>
           </motion.section>
 
           {/* ── WHY DIFFERENT ─────────────────────────────────────────────── */}
@@ -969,10 +965,10 @@ export function LandingView() {
           <footer className="border-t border-white/8 pb-4 pt-10">
             <div className="flex flex-col items-center justify-between gap-4 text-xs text-muted-foreground sm:flex-row">
               <div className="flex items-center gap-2">
-                <div className="flex size-6 items-center justify-center rounded-md bg-gradient-to-br from-blue-500 to-blue-700">
-                  <Cpu className="size-3 text-white" />
+                <div className="relative size-6 overflow-hidden rounded-md">
+                  <Image src="/logo.png" alt="Render2Real Pro" fill unoptimized className="object-cover" />
                 </div>
-                <span>Render2Real Pro · M Mérnöki Iroda Kft.</span>
+                <span>Render2Real Pro</span>
               </div>
               <div className="flex items-center gap-4">
                 <Link href="/login" className="transition hover:text-foreground">{copy.nav.signIn}</Link>
