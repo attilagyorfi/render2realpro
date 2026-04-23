@@ -47,3 +47,4 @@ next-env.d.ts
 storage/
 prisma/dev.db
 coverage/
+prisma/prisma/dev.db
