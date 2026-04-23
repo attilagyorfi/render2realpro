@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition, type MouseEvent } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Cropper from "react-easy-crop";
 import Image from "next/image";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -17,6 +17,7 @@ import { toast } from "sonner";
 
 import { AppFrame } from "@/components/layout/app-frame";
 import { ComparisonView } from "@/components/comparison/comparison-view";
+import { TextureCanvas } from "@/components/workspace/texture-canvas";
 import { UploadDropzone } from "@/components/upload/upload-dropzone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -539,14 +540,10 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
   const generatedSource = compareVersion?.fileUrl ?? previewSource;
   const hasGeneratedVersion = Boolean(compareVersion) && compareVersion?.versionType !== "original";
 
-  const handleTextureSurfaceSelect = (event: MouseEvent<HTMLDivElement>) => {
+  const handleTextureSurfaceSelect = (x: number, y: number) => {
     if (mode !== "texture-targeting" || !selectedAsset) {
       return;
     }
-
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const x = Number(((event.clientX - bounds.left) / bounds.width).toFixed(3));
-    const y = Number(((event.clientY - bounds.top) / bounds.height).toFixed(3));
 
     const selectionInput =
       selectionMode === "click-select"
@@ -675,18 +672,26 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
           animate={{ opacity: 1, y: 0 }}
           className="surface-panel flex min-h-0 flex-col rounded-[32px] p-4"
         >
-          <div className="flex flex-wrap items-center gap-2 border-b border-white/10 pb-4">
-            <Button variant="outline" size="sm" disabled>
+          {/* ── Toolbar ──────────────────────────────────────────────────── */}
+          <div className="flex flex-wrap items-center gap-2 border-b border-white/8 pb-4">
+            {/* Auto-saved indicator */}
+            <div className="flex items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/8 px-3 py-1 text-xs text-emerald-400">
+              <div className="size-1.5 rounded-full bg-emerald-400" />
               {t("workspace.autoSaved", language)}
-            </Button>
+            </div>
+
+            <div className="h-4 w-px bg-white/10" />
+
+            {/* Primary action */}
             {mode === "realism-pass" ? (
               <Button
                 size="sm"
                 onClick={() => generateMutation.mutate(undefined)}
                 disabled={!selectedAsset || !activePresetId || generateMutation.isPending}
+                className="relative"
               >
                 <ScanSearch data-icon="inline-start" />
-                {t("workspace.generate", language)}
+                {generateMutation.isPending ? t("common.loading", language) : t("workspace.generate", language)}
               </Button>
             ) : (
               <Button
@@ -698,11 +703,14 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                 {t("workspace.texturePreviewAction", language)}
               </Button>
             )}
+
+            {/* Secondary actions */}
             <Button
               variant="outline"
               size="sm"
               onClick={() => startTransition(() => setCompareEnabled(!compareEnabled))}
               disabled={!compareVersion}
+              className={compareEnabled ? "border-blue-500/40 bg-blue-500/10 text-blue-300" : ""}
             >
               <SplitSquareVertical data-icon="inline-start" />
               {compareEnabled ? t("workspace.hideCompare", language) : t("common.compare", language)}
@@ -716,10 +724,14 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
               <Download data-icon="inline-start" />
               {t("common.export", language)}
             </Button>
+
+            <div className="h-4 w-px bg-white/10" />
+
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
               onClick={() => setControlsCollapsed((current) => !current)}
+              className="text-zinc-400 hover:text-zinc-200"
             >
               {controlsCollapsed ? (
                 <PanelRightOpen data-icon="inline-start" />
@@ -730,16 +742,18 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                 ? t("workspace.showControls", language)
                 : t("workspace.hideControls", language)}
             </Button>
-            <div className="surface-chip ml-auto flex min-w-0 items-center gap-2 rounded-full px-3 py-1 text-xs text-muted-foreground">
+
+            {/* Provider status pill */}
+            <div className="ml-auto flex min-w-0 items-center gap-2 rounded-full border border-white/10 bg-white/4 px-3 py-1 text-xs text-zinc-400">
+              <div className="size-1.5 rounded-full bg-blue-400" />
               <span className="truncate">
-                {t("workspace.provider", language)}:{" "}
                 {effectiveProvider
                   ? t(`provider.${effectiveProvider.name}.label`, language)
                   : t("common.loading", language)}
               </span>
-              {effectiveProvider?.model ? <Badge variant="outline">{effectiveProvider.model}</Badge> : null}
+              {effectiveProvider?.model ? <Badge variant="outline" className="text-[0.65rem]">{effectiveProvider.model}</Badge> : null}
               {activeProvider && !activeProvider.configured ? (
-                <Badge variant="outline">{t("workspace.fallback", language)}</Badge>
+                <Badge variant="outline" className="border-amber-500/30 text-amber-400 text-[0.65rem]">{t("workspace.fallback", language)}</Badge>
               ) : null}
             </div>
           </div>
@@ -780,53 +794,52 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
             ) : null}
 
             <div className="grid gap-4 lg:grid-cols-2">
-              <div className="surface-panel overflow-hidden rounded-[28px]">
-                <div className="border-b border-[color:var(--border-subtle)] px-4 py-3 text-sm font-medium text-foreground">
-                  {t("workspace.originalReference", language)}
-                </div>
-                <div
-                  className={`relative h-[20rem] ${mode === "texture-targeting" ? "cursor-crosshair" : ""}`}
-                  onClick={handleTextureSurfaceSelect}
-                >
-                  {selectedAsset?.storedFileUrl ? (
-                    <Image
-                      src={selectedAsset.storedFileUrl}
-                      alt={t("workspace.originalReference", language)}
-                      fill
-                      unoptimized
-                      sizes="50vw"
-                      className="object-contain"
-                    />
-                  ) : null}
-                  {mode === "texture-targeting" ? (
-                    <div className="absolute inset-x-4 top-4 rounded-full border border-white/15 bg-black/50 px-3 py-1 text-xs text-white/80 backdrop-blur">
+              {/* Original Reference Panel — TextureCanvas */}
+              <div className="overflow-hidden rounded-[28px] border border-white/8 bg-[#0a0d14]">
+                <div className="flex items-center justify-between border-b border-white/8 px-4 py-2.5">
+                  <span className="text-xs font-medium uppercase tracking-[0.16em] text-zinc-500">
+                    {t("workspace.originalReference", language)}
+                  </span>
+                  {mode === "texture-targeting" && (
+                    <span className="flex items-center gap-1.5 rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-0.5 text-[0.65rem] text-sky-400">
+                      <div className="size-1 rounded-full bg-sky-400 animate-pulse" />
                       {t("workspace.textureSelectionClickHint", language)}
-                    </div>
-                  ) : null}
-                  {selectionMask ? (
-                    <div
-                      className="pointer-events-none absolute rounded-[20px] border border-sky-300 bg-sky-400/15 shadow-[0_0_0_1px_rgba(125,211,252,0.35)]"
-                      style={{
-                        left: `${selectionMask.bounds.x * 100}%`,
-                        top: `${selectionMask.bounds.y * 100}%`,
-                        width: `${selectionMask.bounds.width * 100}%`,
-                        height: `${selectionMask.bounds.height * 100}%`,
-                      }}
+                    </span>
+                  )}
+                </div>
+                <div className="relative h-[22rem]">
+                  {selectedAsset?.storedFileUrl ? (
+                    <TextureCanvas
+                      imageUrl={selectedAsset.storedFileUrl}
+                      imageAlt={t("workspace.originalReference", language)}
+                      selectionMask={selectionMask}
+                      materialLabel={targetMaterial ? targetMaterial.replace(/-/g, " ") : undefined}
+                      active={mode === "texture-targeting"}
+                      onSelect={handleTextureSurfaceSelect}
+                      isPending={textureSelectionMutation.isPending}
+                      hintText={t("workspace.textureSelectionClickHint", language)}
                     />
-                  ) : null}
+                  ) : (
+                    <div className="flex h-full items-center justify-center">
+                      <p className="text-xs text-zinc-600">{t("workspace.projectFiles", language)}</p>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              <div className="surface-panel overflow-hidden rounded-[28px]">
-                <div className="border-b border-[color:var(--border-subtle)] px-4 py-3 text-sm font-medium text-foreground">
-                  {t("workspace.latestOutput", language)}
-                  {compareVersion ? (
-                    <span className="ml-2 text-xs text-muted-foreground">
+              {/* Output Panel */}
+              <div className="overflow-hidden rounded-[28px] border border-white/8 bg-[#0a0d14]">
+                <div className="flex items-center justify-between border-b border-white/8 px-4 py-2.5">
+                  <span className="text-xs font-medium uppercase tracking-[0.16em] text-zinc-500">
+                    {t("workspace.latestOutput", language)}
+                  </span>
+                  {compareVersion && (
+                    <Badge variant="outline" className="border-violet-500/30 bg-violet-500/10 text-violet-300 text-[0.65rem]">
                       {formatVersionLabel(compareVersion.versionType, language)}
-                    </span>
-                  ) : null}
+                    </Badge>
+                  )}
                 </div>
-                <div className="relative h-[20rem]">
+                <div className="relative h-[22rem]">
                   {hasGeneratedVersion && generatedSource ? (
                     <Image
                       src={generatedSource}
@@ -845,10 +858,17 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                       sizes="50vw"
                       className="object-contain"
                     />
-                  ) : null}
+                  ) : (
+                    <div className="flex h-full flex-col items-center justify-center gap-3">
+                      <div className="flex size-12 items-center justify-center rounded-[18px] border border-white/8 bg-white/4">
+                        <ImageIcon className="size-5 text-zinc-600" />
+                      </div>
+                      <p className="text-xs text-zinc-600">{t("workspace.generate", language)}</p>
+                    </div>
+                  )}
                   {selectionMask && mode === "texture-targeting" ? (
                     <div
-                      className="pointer-events-none absolute rounded-[20px] border border-amber-300/80 bg-amber-300/10"
+                      className="pointer-events-none absolute rounded-[16px] border-2 border-amber-400/70 bg-amber-400/8"
                       style={{
                         left: `${selectionMask.bounds.x * 100}%`,
                         top: `${selectionMask.bounds.y * 100}%`,
@@ -865,10 +885,9 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
               {isLoading ? <div className="h-full rounded-[28px] bg-white/5" /> : canvas}
             </div>
 
-            <div className="surface-panel rounded-[24px] px-4 py-3">
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>{t("workspace.queueStatus", language)}</span>
-                <span className="flex items-center gap-2">
+            <div className="rounded-[20px] border border-white/8 bg-[#0a0d14] px-4 py-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs text-zinc-500">
                   <StatusDot
                     tone={
                       queue[0]?.status === "completed"
@@ -882,6 +901,9 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                               : "neutral"
                     }
                   />
+                  <span className="uppercase tracking-[0.14em]">{t("workspace.queueStatus", language)}</span>
+                </div>
+                <span className="font-mono text-xs text-zinc-400">
                   {queue[0]?.message || latestLog?.status || t("common.idle", language)}
                 </span>
               </div>
@@ -890,7 +912,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                 className="mt-2"
               />
               {latestLog ? (
-                <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
+                <div className="mt-2 flex items-center justify-between font-mono text-[0.65rem] text-zinc-600">
                   <span>{latestLog.providerName}</span>
                   <span>
                     {latestLog.success
@@ -905,13 +927,18 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
 
         {!controlsCollapsed ? (
           <Card className="surface-panel min-h-0">
-            <CardHeader>
-              <CardTitle>{t("workspace.controls", language)}</CardTitle>
-              <CardDescription>{t("workspace.controlsDescription", language)}</CardDescription>
+            <CardHeader className="border-b border-white/8 pb-4">
+              <div className="flex items-center gap-2">
+                <div className="flex size-7 items-center justify-center rounded-[10px] border border-blue-500/20 bg-blue-500/10">
+                  <ScanSearch className="size-3.5 text-blue-400" />
+                </div>
+                <CardTitle className="text-sm">{t("workspace.controls", language)}</CardTitle>
+              </div>
+              <CardDescription className="text-xs">{t("workspace.controlsDescription", language)}</CardDescription>
             </CardHeader>
             <CardContent className="flex h-[calc(100%-5.5rem)] flex-col gap-4">
               <div className="flex flex-col gap-2">
-                <div className="text-xs uppercase tracking-[0.24em] text-zinc-500">
+                <div className="text-[0.65rem] uppercase tracking-[0.24em] text-zinc-600">
                   {t("workspace.modeSwitcher", language)}
                 </div>
                 <Tabs value={mode} onValueChange={(value) => setMode(value as typeof mode)}>
@@ -1166,39 +1193,49 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
 
                   <Separator />
 
-                  <div className="flex flex-col gap-3">
-                    <div className="text-xs uppercase tracking-[0.24em] text-zinc-500">
+                  <div className="flex flex-col gap-2">
+                    <div className="text-[0.65rem] uppercase tracking-[0.24em] text-zinc-600">
                       {t("workspace.versionHistory", language)}
                     </div>
                     {selectedAsset?.imageVersions.map((version) => {
                       const isGeneratedVersion =
                         version.versionType === "realism_pass" || version.versionType === "texture_pass";
+                      const isActive = version.id === selectedVersion?.id;
 
                       return (
                         <button
                           key={version.id}
                           type="button"
                           onClick={() => setSelectedAsset(selectedAsset.id, version.id)}
-                          className={`flex items-center justify-between rounded-2xl border px-3 py-3 text-left ${
-                            version.id === selectedVersion?.id
-                              ? "border-white/40 bg-white/10"
-                              : "border-white/10 bg-black/20"
+                          className={`flex items-center justify-between rounded-[18px] border px-3 py-2.5 text-left transition ${
+                            isActive
+                              ? "border-blue-500/40 bg-blue-500/10"
+                              : "border-white/8 bg-white/3 hover:bg-white/5"
                           }`}
                         >
-                          <div className="flex items-center gap-3">
-                            <div className="flex size-10 items-center justify-center rounded-2xl bg-white/10">
-                              <ImageIcon className="size-4 text-white" />
+                          <div className="flex items-center gap-2.5">
+                            <div className={`flex size-8 items-center justify-center rounded-[12px] border ${
+                              isActive
+                                ? "border-blue-500/30 bg-blue-500/15"
+                                : "border-white/10 bg-white/5"
+                            }`}>
+                              <ImageIcon className={`size-3.5 ${isActive ? "text-blue-400" : "text-zinc-500"}`} />
                             </div>
                             <div>
-                              <div className="text-sm text-white">
+                              <div className={`text-xs font-medium ${isActive ? "text-blue-200" : "text-zinc-300"}`}>
                                 {formatVersionLabel(version.versionType, language)}
                               </div>
-                              <div className="text-xs text-zinc-500">
+                              <div className="font-mono text-[0.6rem] text-zinc-600">
                                 {new Date(version.createdAt).toLocaleString()}
                               </div>
                             </div>
                           </div>
-                          <Badge variant={isGeneratedVersion ? "secondary" : "outline"}>
+                          <Badge
+                            variant={isGeneratedVersion ? "secondary" : "outline"}
+                            className={isGeneratedVersion
+                              ? "border-violet-500/30 bg-violet-500/10 text-violet-300 text-[0.6rem]"
+                              : "border-white/10 text-zinc-500 text-[0.6rem]"}
+                          >
                             {isGeneratedVersion
                               ? t("common.generated", language)
                               : t("common.saved", language)}
