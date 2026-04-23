@@ -1,0 +1,95 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  id               String       @id @default(cuid())
+  name             String
+  description      String?
+  clientName       String?
+  coverImageAssetId String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  imageAssets      ImageAsset[]
+}
+
+model ImageAsset {
+  id               String           @id @default(cuid())
+  projectId        String
+  originalFileName String
+  storedFilePath   String
+  previewPath      String
+  imageType        String
+  mimeType         String
+  width            Int
+  height           Int
+  size             Int
+  status           ImageAssetStatus @default(ready)
+  createdAt        DateTime         @default(now())
+  project          Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  imageVersions    ImageVersion[]
+  generationLogs   GenerationLog[]
+}
+
+model ImageVersion {
+  id            String       @id @default(cuid())
+  imageAssetId  String
+  versionType   ImageVersionType
+  filePath      String
+  promptUsed    String?
+  presetUsed    String?
+  settingsJson  String
+  metadataJson  String?
+  createdAt     DateTime     @default(now())
+  imageAsset    ImageAsset    @relation(fields: [imageAssetId], references: [id], onDelete: Cascade)
+}
+
+model Preset {
+  id           String   @id @default(cuid())
+  name         String   @unique
+  description  String?
+  category     String
+  settingsJson String
+  createdAt    DateTime @default(now())
+}
+
+model GenerationLog {
+  id             String              @id @default(cuid())
+  imageAssetId   String
+  jobType        String              @default("realism_pass")
+  providerName   String
+  promptVersion  String
+  settingsJson   String
+  success        Boolean
+  errorMessage   String?
+  processingTime Int
+  status         GenerationLogStatus @default(queued)
+  createdAt      DateTime            @default(now())
+  imageAsset     ImageAsset          @relation(fields: [imageAssetId], references: [id], onDelete: Cascade)
+}
+
+enum ImageVersionType {
+  original
+  realism_pass
+  texture_pass
+  edited
+  final
+}
+
+enum ImageAssetStatus {
+  ready
+  processing
+  failed
+}
+
+enum GenerationLogStatus {
+  queued
+  processing
+  completed
+  failed
+}

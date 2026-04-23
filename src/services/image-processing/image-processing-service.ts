@@ -1,0 +1,145 @@
+import { GenerationLogStatus, ImageVersionType } from "@prisma/client";
+
+import { buildPromptDocument } from "@/features/prompt-engine/build-prompt";
+import { prisma } from "@/lib/prisma";
+import { MockLocalProvider } from "@/services/providers/mock-provider";
+import { OpenAiImageEditingProvider } from "@/services/providers/openai-provider";
+import { getActiveProviderName } from "@/services/providers/provider-registry";
+import { mergePresetSettings } from "@/config/presets";
+import type { GenerationRequestPayload } from "@/types/domain";
+import type { ProviderAdapter } from "@/services/providers/provider-adapter";
+
+const mockProvider = new MockLocalProvider();
+const openAiProvider = new OpenAiImageEditingProvider();
+
+function resolveProvider(providerOverride?: string): ProviderAdapter {
+  if (providerOverride === mockProvider.name) {
+    return mockProvider;
+  }
+
+  if (providerOverride === openAiProvider.name) {
+    return openAiProvider;
+  }
+
+  const activeProvider = getActiveProviderName();
+  return activeProvider === openAiProvider.name ? openAiProvider : mockProvider;
+}
+
+export async function createGenerationJob(input: GenerationRequestPayload) {
+  const imageAsset = await prisma.imageAsset.findUnique({
+    where: { id: input.imageAssetId },
+    include: {
+      project: true,
+      imageVersions: {
+        orderBy: { createdAt: "desc" },
+      },
+    },
+  });
+
+  if (!imageAsset) {
+    throw new Error("Image asset not found.");
+  }
+
+  const preset = await prisma.preset.findUnique({
+    where: { id: input.presetId },
+  });
+
+  if (!preset) {
+    throw new Error("Preset not found.");
+  }
+
+  const parsedSettings = JSON.parse(preset.settingsJson);
+  const mergedSettings = mergePresetSettings(parsedSettings, input.settingsOverride);
+  const provider = resolveProvider(input.providerOverride);
+  const promptDocument = buildPromptDocument({
+    imageName: imageAsset.originalFileName,
+    presetName: preset.name,
+    settings: mergedSettings,
+    customDirectives: input.customDirectives,
+  });
+
+  const generationLog = await prisma.generationLog.create({
+    data: {
+      imageAssetId: imageAsset.id,
+      providerName: provider.name,
+      promptVersion: promptDocument.title,
+      settingsJson: JSON.stringify(mergedSettings),
+      success: false,
+      processingTime: 0,
+      status: GenerationLogStatus.queued,
+    },
+  });
+
+  await prisma.imageAsset.update({
+    where: { id: imageAsset.id },
+    data: { status: "processing" },
+  });
+
+  try {
+    await prisma.generationLog.update({
+      where: { id: generationLog.id },
+      data: { status: GenerationLogStatus.processing },
+    });
+
+    const result = await provider.generateRealismPass({
+      projectId: imageAsset.projectId,
+      sourcePath: imageAsset.storedFilePath,
+      prompt: {
+        imageName: imageAsset.originalFileName,
+        presetName: preset.name,
+        settings: mergedSettings,
+        customDirectives: input.customDirectives,
+      },
+    });
+
+    const imageVersion = await prisma.imageVersion.create({
+      data: {
+        imageAssetId: imageAsset.id,
+        versionType: ImageVersionType.realism_pass,
+        filePath: result.filePath,
+        promptUsed: promptDocument.fullPrompt,
+        presetUsed: preset.name,
+        settingsJson: JSON.stringify(mergedSettings),
+        metadataJson: JSON.stringify(result.metadata),
+      },
+    });
+
+    await prisma.generationLog.update({
+      where: { id: generationLog.id },
+      data: {
+        success: true,
+        processingTime: result.processingTimeMs,
+        status: GenerationLogStatus.completed,
+      },
+    });
+
+    await prisma.imageAsset.update({
+      where: { id: imageAsset.id },
+      data: { status: "ready" },
+    });
+
+    return {
+      generationLogId: generationLog.id,
+      imageVersionId: imageVersion.id,
+      promptDocument,
+      settings: mergedSettings,
+    };
+  } catch (error) {
+    await prisma.generationLog.update({
+      where: { id: generationLog.id },
+      data: {
+        success: false,
+        processingTime: 0,
+        status: GenerationLogStatus.failed,
+        errorMessage: error instanceof Error ? error.message : "Unknown generation failure.",
+      },
+    });
+
+    await prisma.imageAsset.update({
+      where: { id: imageAsset.id },
+      data: { status: "failed" },
+    });
+
+    throw error;
+  }
+}
