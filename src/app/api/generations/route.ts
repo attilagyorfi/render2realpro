@@ -6,11 +6,15 @@ import { classifyGenerationFailure } from "@/services/image-processing/generatio
 
 const generationSchema = z.object({
   imageAssetId: z.string(),
-  presetId: z.string(),
+  presetId: z.string().optional(),
+  customPrompt: z.string().optional(),
   settingsOverride: z.record(z.string(), z.unknown()).optional(),
   customDirectives: z.array(z.string()).optional(),
   providerOverride: z.string().optional(),
-});
+}).refine(
+  (data) => data.presetId || data.customPrompt,
+  { message: "Either presetId or customPrompt must be provided." }
+);
 
 export async function POST(request: Request) {
   try {

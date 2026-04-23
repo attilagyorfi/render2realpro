@@ -13,13 +13,21 @@ const createProjectSchema = z.object({
 });
 
 export async function GET() {
-  await ensureDefaultPresets();
+  try {
+    await ensureDefaultPresets();
+  } catch {
+    // Non-fatal: presets may already exist or DB may not be ready yet
+  }
   try {
     const profile = await requireCurrentProfile();
     const projects = await listProjects(profile.id);
     return NextResponse.json({ projects: projects.map((project) => serializeProject(project)) });
-  } catch {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  } catch (error) {
+    if (error instanceof Error && error.message === "UNAUTHORIZED_PROFILE_SESSION") {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+    console.error("[GET /api/projects]", error);
+    return NextResponse.json({ error: "Internal server error." }, { status: 500 });
   }
 }
 
@@ -33,7 +41,10 @@ export async function POST(request: Request) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: error.issues[0]?.message ?? "Invalid payload." }, { status: 400 });
     }
-
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    if (error instanceof Error && error.message === "UNAUTHORIZED_PROFILE_SESSION") {
+      return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    }
+    console.error("[POST /api/projects]", error);
+    return NextResponse.json({ error: "Internal server error." }, { status: 500 });
   }
 }

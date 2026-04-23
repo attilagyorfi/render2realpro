@@ -88,7 +88,8 @@ export type WorkspaceEditorState = {
 
 export type GenerationRequestPayload = {
   imageAssetId: string;
-  presetId: string;
+  presetId?: string;
+  customPrompt?: string;
   settingsOverride?: Partial<PresetSettings>;
   customDirectives?: string[];
   providerOverride?: string;

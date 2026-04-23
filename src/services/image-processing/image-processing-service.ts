@@ -40,22 +40,29 @@ export async function createGenerationJob(input: GenerationRequestPayload) {
     throw new Error("Image asset not found.");
   }
 
-  const preset = await prisma.preset.findUnique({
-    where: { id: input.presetId },
-  });
+  // Resolve preset — required for preset mode, optional for custom prompt mode
+  const preset = input.presetId
+    ? await prisma.preset.findUnique({ where: { id: input.presetId } })
+    : await prisma.preset.findFirst({ orderBy: { createdAt: "asc" } });
 
   if (!preset) {
-    throw new Error("Preset not found.");
+    throw new Error("No preset available. Please seed the database.");
   }
 
   const parsedSettings = JSON.parse(preset.settingsJson);
   const mergedSettings = mergePresetSettings(parsedSettings, input.settingsOverride);
   const provider = resolveProvider(input.providerOverride);
+
+  // Custom prompt mode: use the user's prompt as the primary directive
+  const effectiveDirectives = input.customPrompt
+    ? [input.customPrompt, ...(input.customDirectives ?? [])]
+    : input.customDirectives;
+
   const promptDocument = buildPromptDocument({
     imageName: imageAsset.originalFileName,
-    presetName: preset.name,
+    presetName: input.presetId ? preset.name : "custom",
     settings: mergedSettings,
-    customDirectives: input.customDirectives,
+    customDirectives: effectiveDirectives,
   });
 
   const generationLog = await prisma.generationLog.create({
@@ -86,9 +93,9 @@ export async function createGenerationJob(input: GenerationRequestPayload) {
       sourcePath: imageAsset.storedFilePath,
       prompt: {
         imageName: imageAsset.originalFileName,
-        presetName: preset.name,
+        presetName: input.presetId ? preset.name : "custom",
         settings: mergedSettings,
-        customDirectives: input.customDirectives,
+        customDirectives: effectiveDirectives,
       },
     });
 
