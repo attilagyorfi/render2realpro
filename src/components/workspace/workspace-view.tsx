@@ -530,6 +530,8 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
       }
       toast.success(t("workspace.generationCompleted", language));
       queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+      // Auto-enable comparison so user immediately sees before/after result
+      setCompareEnabled(true);
     },
     onError: (error) => {
       if (error instanceof ApiError) {
@@ -624,21 +626,40 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
               <div className="flex items-center gap-3">
                 {/* Mini controls in fullscreen */}
                 {!customPromptEnabled && (
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3" style={{ pointerEvents: "auto", position: "relative", zIndex: 60 }}>
                     {sliderControls.slice(0, 3).map((ctrl) => (
                       <div key={ctrl.key} className="flex items-center gap-2">
                         <span className="text-xs text-zinc-500">{t(ctrl.labelKey, language)}</span>
-                        <Slider
-                          value={[Number(editor[ctrl.key as keyof typeof editor])]}
-                          min={ctrl.min}
-                          max={ctrl.max}
-                          step={1}
-                          className="w-24"
-                          onValueChange={(v) => setEditorValue(ctrl.key as keyof typeof editor, (Array.isArray(v) ? v[0] : v) as never)}
-                        />
+                        <div style={{ pointerEvents: "auto", position: "relative", zIndex: 60 }}>
+                          <Slider
+                            value={[Number(editor[ctrl.key as keyof typeof editor])]}
+                            min={ctrl.min}
+                            max={ctrl.max}
+                            step={1}
+                            className="w-24"
+                            onValueChange={(v) => setEditorValue(ctrl.key as keyof typeof editor, (Array.isArray(v) ? v[0] : v) as never)}
+                          />
+                        </div>
                       </div>
                     ))}
                   </div>
+                )}
+                {/* Compare toggle in fullscreen */}
+                {hasGeneratedVersion && (
+                  <button
+                    type="button"
+                    onClick={() => setCompareEnabled(!compareEnabled)}
+                    className={`flex items-center gap-1.5 rounded-[8px] border px-2.5 py-1.5 text-xs transition ${
+                      compareEnabled
+                        ? "border-blue-500/40 bg-blue-500/15 text-blue-300"
+                        : "border-white/10 bg-white/5 text-zinc-400 hover:bg-white/10 hover:text-zinc-200"
+                    }`}
+                  >
+                    <SplitSquareVertical className="size-3.5" />
+                    {compareEnabled
+                      ? (language === "hu" ? "Összehasonlítás ki" : "Hide compare")
+                      : (language === "hu" ? "Összehasonlítás" : "Compare")}
+                  </button>
                 )}
                 <button
                   type="button"
@@ -650,14 +671,15 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
               </div>
             </div>
             {/* Content */}
-            <div className="min-h-0 flex-1 p-4">
-              {hasGeneratedVersion ? (
+            <div className="min-h-0 flex-1 p-4 flex flex-col">
+              {compareEnabled && hasGeneratedVersion ? (
                 <ComparisonView
                   before={originalVersion?.fileUrl ?? referenceUrl ?? ""}
                   after={compareVersion?.fileUrl ?? displayUrl ?? ""}
                   mode="slider"
                   beforeLabel={language === "hu" ? "Eredeti render" : "Original render"}
                   afterLabel={language === "hu" ? "AI-javított eredmény" : "AI-enhanced result"}
+                  className="h-full"
                 />
               ) : (
                 <ZoomableImagePanel
