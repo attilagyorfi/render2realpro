@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import {
   FolderKanban,
@@ -84,13 +85,23 @@ export function AppFrame({
     <div className="app-shell min-h-screen text-foreground">
       <header className="sticky top-0 z-30 border-b border-[color:var(--border-subtle)]/80 bg-[color:color-mix(in_srgb,var(--bg-base)_86%,transparent)] backdrop-blur-xl">
         <div className="mx-auto flex w-full max-w-[1680px] items-center justify-between gap-6 px-6 py-4">
-          <div className="flex min-w-0 flex-col">
-            <span className="text-[0.68rem] uppercase tracking-[0.28em] text-muted-foreground">
-              {eyebrow}
-            </span>
-            <h1 className="font-heading text-xl font-semibold tracking-tight text-foreground">
-              {title}
-            </h1>
+          <div className="flex items-center gap-3 min-w-0">
+            {/* Logo — navigates to landing page */}
+            <Link href="/" className="flex items-center gap-2.5 shrink-0 group">
+              <Image src="/logo.png" alt="Render2Real Pro" width={30} height={30} className="rounded-lg" />
+              <span className="hidden font-heading text-sm font-semibold tracking-tight text-foreground group-hover:text-blue-400 transition-colors md:block">
+                render2real <span className="text-blue-400">pro</span>
+              </span>
+            </Link>
+            <div className="h-5 w-px bg-white/10 hidden md:block" />
+            <div className="flex min-w-0 flex-col">
+              <span className="text-[0.68rem] uppercase tracking-[0.28em] text-muted-foreground">
+                {eyebrow}
+              </span>
+              <h1 className="font-heading text-xl font-semibold tracking-tight text-foreground">
+                {title}
+              </h1>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <nav className="hidden items-center gap-2 md:flex">

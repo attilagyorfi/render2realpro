@@ -7,19 +7,21 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  FolderOpen,
   Image as ImageIcon,
   PanelRightClose,
+  Plus,
   ScanSearch,
+  Sparkles,
   SplitSquareVertical,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "sonner";
 
 import { AppFrame } from "@/components/layout/app-frame";
 import { ComparisonView } from "@/components/comparison/comparison-view";
-import { UploadDropzone } from "@/components/upload/upload-dropzone";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -48,7 +50,7 @@ import {
 import { useAppPreferencesStore } from "@/store/app-preferences";
 import { useWorkspaceStore } from "@/store/workspace-store";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 type ProjectDataResponse = {
   project: {
@@ -101,34 +103,33 @@ type ProvidersResponse = {
   }>;
 };
 
-// ─── Slider controls definition ─────────────────────────────────────────────
+// ─── Slider controls ─────────────────────────────────────────────────────────
 
 const sliderControls = [
-  { key: "brightness",    labelKey: "workspace.brightness",    min: 60,  max: 140 },
-  { key: "contrast",      labelKey: "workspace.contrast",      min: 70,  max: 140 },
-  { key: "highlights",    labelKey: "workspace.highlights",    min: 60,  max: 140 },
-  { key: "shadows",       labelKey: "workspace.shadows",       min: 60,  max: 140 },
-  { key: "saturation",    labelKey: "workspace.saturation",    min: 60,  max: 140 },
-  { key: "temperature",   labelKey: "workspace.temperature",   min: -30, max: 30  },
-  { key: "sharpen",       labelKey: "workspace.sharpen",       min: 0,   max: 40  },
-  { key: "dehaze",        labelKey: "workspace.dehaze",        min: 0,   max: 40  },
-  { key: "noiseReduction",labelKey: "workspace.noiseReduction",min: 0,   max: 40  },
-  { key: "vignette",      labelKey: "workspace.vignette",      min: 0,   max: 30  },
+  { key: "brightness",     labelKey: "workspace.brightness",     min: 60,  max: 140 },
+  { key: "contrast",       labelKey: "workspace.contrast",       min: 70,  max: 140 },
+  { key: "highlights",     labelKey: "workspace.highlights",     min: 60,  max: 140 },
+  { key: "shadows",        labelKey: "workspace.shadows",        min: 60,  max: 140 },
+  { key: "saturation",     labelKey: "workspace.saturation",     min: 60,  max: 140 },
+  { key: "temperature",    labelKey: "workspace.temperature",    min: -30, max: 30  },
+  { key: "sharpen",        labelKey: "workspace.sharpen",        min: 0,   max: 40  },
+  { key: "dehaze",         labelKey: "workspace.dehaze",         min: 0,   max: 40  },
+  { key: "noiseReduction", labelKey: "workspace.noiseReduction", min: 0,   max: 40  },
+  { key: "vignette",       labelKey: "workspace.vignette",       min: 0,   max: 30  },
 ] as const;
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function applyPresetToEditorSliders(
   settings: Record<string, unknown>,
   setEditorValue: (key: string, value: number) => void
 ) {
-  const ri  = typeof settings.realismIntensity    === "number" ? settings.realismIntensity    : 0.85;
-  const ss  = typeof settings.shadowStrength      === "number" ? settings.shadowStrength      : 0.5;
+  const ri  = typeof settings.realismIntensity      === "number" ? settings.realismIntensity      : 0.85;
+  const ss  = typeof settings.shadowStrength        === "number" ? settings.shadowStrength        : 0.5;
   const ao  = typeof settings.ambientOcclusionLevel === "number" ? settings.ambientOcclusionLevel : 0.5;
-  const wi  = typeof settings.weatheringIntensity === "number" ? settings.weatheringIntensity : 0.3;
-  const ri2 = typeof settings.reflectionIntensity === "number" ? settings.reflectionIntensity : 0.5;
+  const wi  = typeof settings.weatheringIntensity   === "number" ? settings.weatheringIntensity   : 0.3;
+  const ri2 = typeof settings.reflectionIntensity   === "number" ? settings.reflectionIntensity   : 0.5;
   const vn  = typeof settings.vegetationNaturalness === "number" ? settings.vegetationNaturalness : 0.4;
-
   setEditorValue("brightness",    Math.round(90 + ri  * 20));
   setEditorValue("contrast",      Math.round(85 + ss  * 30));
   setEditorValue("shadows",       Math.round(70 + ao  * 40));
@@ -139,26 +140,17 @@ function applyPresetToEditorSliders(
   setEditorValue("dehaze",        Math.round(ao  * 20));
 }
 
-function buildCssFilter(editor: ReturnType<typeof useWorkspaceStore.getState>["editor"]) {
-  return [
-    `brightness(${editor.brightness}%)`,
-    `contrast(${editor.contrast}%)`,
-    `saturate(${editor.saturation}%)`,
-    `sepia(${Math.max(0, editor.temperature)}%)`,
-  ].join(" ");
-}
-
 function formatVersionLabel(
   versionType: string,
   language: ReturnType<typeof useAppPreferencesStore.getState>["language"]
 ) {
   switch (versionType) {
-    case "realism_pass":  return t("versions.realism_pass", language);
-    case "texture_pass":  return t("versions.texture_pass", language);
-    case "original":      return t("versions.original", language);
-    case "edited":        return t("versions.edited", language);
-    case "final":         return t("versions.final", language);
-    default:              return versionType;
+    case "realism_pass": return t("versions.realism_pass", language);
+    case "texture_pass": return t("versions.texture_pass", language);
+    case "original":     return t("versions.original", language);
+    case "edited":       return t("versions.edited", language);
+    case "final":        return t("versions.final", language);
+    default:             return versionType;
   }
 }
 
@@ -166,7 +158,7 @@ export function getControlledSelectValue(value?: string) {
   return value ?? "";
 }
 
-// ─── Zoomable image panel ────────────────────────────────────────────────────
+// ─── Zoomable image panel ─────────────────────────────────────────────────────
 
 function ZoomableImagePanel({
   src,
@@ -174,12 +166,14 @@ function ZoomableImagePanel({
   label,
   badge,
   emptyText,
+  className = "",
 }: {
   src?: string;
   alt: string;
   label: string;
   badge?: React.ReactNode;
   emptyText: string;
+  className?: string;
 }) {
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -190,13 +184,11 @@ function ZoomableImagePanel({
     e.preventDefault();
     setZoom((z) => Math.min(5, Math.max(1, z - e.deltaY * 0.001)));
   }, []);
-
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (zoom <= 1) return;
     setDragging(true);
     dragStart.current = { mx: e.clientX, my: e.clientY, ox: offset.x, oy: offset.y };
   }, [zoom, offset]);
-
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (!dragging || !dragStart.current) return;
     setOffset({
@@ -204,60 +196,37 @@ function ZoomableImagePanel({
       y: dragStart.current.oy + (e.clientY - dragStart.current.my),
     });
   }, [dragging]);
-
   const handleMouseUp = useCallback(() => {
     setDragging(false);
     dragStart.current = null;
   }, []);
-
-  const resetZoom = useCallback(() => {
-    setZoom(1);
-    setOffset({ x: 0, y: 0 });
-  }, []);
+  const resetZoom = useCallback(() => { setZoom(1); setOffset({ x: 0, y: 0 }); }, []);
 
   return (
-    <div className="overflow-hidden rounded-[28px] border border-white/8 bg-[#0a0d14] flex flex-col">
-      {/* Header */}
+    <div className={`overflow-hidden rounded-[28px] border border-white/8 bg-[#0a0d14] flex flex-col ${className}`}>
       <div className="flex items-center justify-between border-b border-white/8 px-4 py-2.5 shrink-0">
         <span className="text-xs font-medium uppercase tracking-[0.16em] text-zinc-500">{label}</span>
         <div className="flex items-center gap-2">
           {badge}
           {src && (
             <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setZoom((z) => Math.max(1, z - 0.25))}
-                className="flex size-5 items-center justify-center rounded-md text-zinc-500 hover:text-zinc-300 transition"
-              >
+              <button type="button" onClick={() => setZoom((z) => Math.max(1, z - 0.25))} className="flex size-5 items-center justify-center rounded-md text-zinc-500 hover:text-zinc-300 transition">
                 <ZoomOut className="size-3" />
               </button>
-              <span className="font-mono text-[0.6rem] text-zinc-600 w-8 text-center">
-                {Math.round(zoom * 100)}%
-              </span>
-              <button
-                type="button"
-                onClick={() => setZoom((z) => Math.min(5, z + 0.25))}
-                className="flex size-5 items-center justify-center rounded-md text-zinc-500 hover:text-zinc-300 transition"
-              >
+              <span className="font-mono text-[0.6rem] text-zinc-600 w-8 text-center">{Math.round(zoom * 100)}%</span>
+              <button type="button" onClick={() => setZoom((z) => Math.min(5, z + 0.25))} className="flex size-5 items-center justify-center rounded-md text-zinc-500 hover:text-zinc-300 transition">
                 <ZoomIn className="size-3" />
               </button>
               {zoom > 1 && (
-                <button
-                  type="button"
-                  onClick={resetZoom}
-                  className="ml-1 rounded-md px-1.5 py-0.5 text-[0.6rem] text-zinc-500 hover:text-zinc-300 border border-white/10 transition"
-                >
-                  reset
-                </button>
+                <button type="button" onClick={resetZoom} className="ml-1 rounded-md px-1.5 py-0.5 text-[0.6rem] text-zinc-500 hover:text-zinc-300 border border-white/10 transition">reset</button>
               )}
             </div>
           )}
         </div>
       </div>
-      {/* Canvas */}
       <div
         className="relative flex-1 overflow-hidden"
-        style={{ minHeight: "22rem", cursor: zoom > 1 ? (dragging ? "grabbing" : "grab") : "default" }}
+        style={{ minHeight: "18rem", cursor: zoom > 1 ? (dragging ? "grabbing" : "grab") : "default" }}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -266,21 +235,10 @@ function ZoomableImagePanel({
       >
         {src ? (
           <div
-            className="absolute inset-0 transition-transform duration-75"
-            style={{
-              transform: `scale(${zoom}) translate(${offset.x / zoom}px, ${offset.y / zoom}px)`,
-              transformOrigin: "center center",
-            }}
+            className="absolute inset-0"
+            style={{ transform: `scale(${zoom}) translate(${offset.x / zoom}px, ${offset.y / zoom}px)`, transformOrigin: "center center" }}
           >
-            <Image
-              src={src}
-              alt={alt}
-              fill
-              unoptimized
-              sizes="50vw"
-              className="object-contain"
-              draggable={false}
-            />
+            <Image src={src} alt={alt} fill unoptimized sizes="50vw" className="object-contain" draggable={false} />
           </div>
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3">
@@ -292,6 +250,143 @@ function ZoomableImagePanel({
         )}
       </div>
     </div>
+  );
+}
+
+// ─── Compact upload button ────────────────────────────────────────────────────
+
+function CompactUploadButton({ projectId }: { projectId: string }) {
+  const language = useAppPreferencesStore((state) => state.language);
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const uploadMutation = useMutation({
+    mutationFn: async (files: File[]) => {
+      const formData = new FormData();
+      files.forEach((file) => formData.append("files", file));
+      const res = await fetch(`/api/projects/${projectId}/assets`, { method: "POST", body: formData });
+      if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.error ?? t("upload.failed", language)); }
+      return res.json();
+    },
+    onSuccess: (_, files) => {
+      toast.success(files.length > 1 ? `${files.length} ${language === "hu" ? "fájl feltöltve" : "files uploaded"}` : t("upload.success", language));
+      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : t("upload.failed", language)),
+  });
+
+  const handleFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []).filter((f) => ["image/png","image/jpeg","image/webp"].includes(f.type));
+    if (files.length > 0) uploadMutation.mutate(files);
+    e.target.value = "";
+    setMenuOpen(false);
+  };
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setMenuOpen((o) => !o)}
+        title={language === "hu" ? "Fájl hozzáadása" : "Add file"}
+        className="flex size-8 items-center justify-center rounded-[12px] border border-white/15 bg-white/5 text-zinc-400 transition hover:border-white/30 hover:bg-white/8 hover:text-zinc-200"
+      >
+        <Plus className="size-4" />
+      </button>
+      <AnimatePresence>
+        {menuOpen && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.92, y: -4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.92, y: -4 }}
+            transition={{ duration: 0.12 }}
+            className="absolute left-0 top-10 z-50 flex flex-col gap-1 rounded-[16px] border border-white/12 bg-[#0f1420] p-1.5 shadow-2xl min-w-[160px]"
+          >
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2.5 rounded-[10px] px-3 py-2 text-sm text-zinc-300 transition hover:bg-white/8"
+            >
+              <ImageIcon className="size-3.5 text-zinc-500" />
+              {language === "hu" ? "Fájl(ok) megnyitása" : "Open file(s)"}
+            </button>
+            <button
+              type="button"
+              onClick={() => folderInputRef.current?.click()}
+              className="flex items-center gap-2.5 rounded-[10px] px-3 py-2 text-sm text-zinc-300 transition hover:bg-white/8"
+            >
+              <FolderOpen className="size-3.5 text-zinc-500" />
+              {language === "hu" ? "Mappa megnyitása" : "Open folder"}
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {/* Hidden inputs */}
+      <input ref={fileInputRef} type="file" className="hidden" multiple accept=".png,.jpg,.jpeg,.webp" onChange={handleFiles} />
+      <input
+        ref={folderInputRef}
+        type="file"
+        className="hidden"
+        multiple
+        // @ts-expect-error – non-standard but widely supported
+        webkitdirectory=""
+        directory=""
+        accept=".png,.jpg,.jpeg,.webp"
+        onChange={handleFiles}
+      />
+    </div>
+  );
+}
+
+// ─── Loading overlay ──────────────────────────────────────────────────────────
+
+function GeneratingOverlay({ language }: { language: string }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-6 rounded-[28px] bg-[#080b12]/92 backdrop-blur-sm"
+    >
+      {/* Animated rings */}
+      <div className="relative flex items-center justify-center">
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+          className="absolute size-24 rounded-full border border-blue-500/20"
+          style={{ borderTopColor: "rgba(59,130,246,0.7)" }}
+        />
+        <motion.div
+          animate={{ rotate: -360 }}
+          transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+          className="absolute size-16 rounded-full border border-violet-500/20"
+          style={{ borderTopColor: "rgba(139,92,246,0.6)" }}
+        />
+        <div className="flex size-10 items-center justify-center rounded-full border border-blue-500/30 bg-blue-500/10">
+          <Sparkles className="size-5 text-blue-400" />
+        </div>
+      </div>
+      <div className="flex flex-col items-center gap-2">
+        <p className="text-sm font-medium text-zinc-200">
+          {language === "hu" ? "AI generálás folyamatban…" : "AI generation in progress…"}
+        </p>
+        <p className="text-xs text-zinc-500">
+          {language === "hu" ? "Ez 30–90 másodpercet vehet igénybe" : "This may take 30–90 seconds"}
+        </p>
+      </div>
+      {/* Animated dots */}
+      <div className="flex gap-1.5">
+        {[0, 1, 2].map((i) => (
+          <motion.div
+            key={i}
+            animate={{ opacity: [0.3, 1, 0.3] }}
+            transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.4 }}
+            className="size-1.5 rounded-full bg-blue-400"
+          />
+        ))}
+      </div>
+    </motion.div>
   );
 }
 
@@ -337,20 +432,29 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
 
   const project = data?.project;
   const presets = useMemo(() => data?.presets ?? [], [data?.presets]);
-  const activeProvider = providerData?.providers.find(
-    (p) => p.name === providerData.activeProvider
-  );
+  const activeProvider = providerData?.providers.find((p) => p.name === providerData.activeProvider);
   const effectiveProvider = activeProvider?.configured
     ? activeProvider
     : providerData?.providers.find((p) => p.name === "mock-local");
 
+  // Selected asset and version
   const selectedAsset =
     project?.imageAssets.find((a) => a.id === selectedAssetId) ?? project?.imageAssets[0];
-  const selectedVersion =
-    selectedAsset?.imageVersions.find((v) => v.id === selectedVersionId) ??
-    selectedAsset?.imageVersions[0];
-  const compareVersion =
-    selectedAsset?.imageVersions.find((v) => v.versionType !== "original") ?? selectedVersion;
+
+  // Version selection: selectedVersionId from store, or first version
+  const selectedVersion = useMemo(() => {
+    if (!selectedAsset) return undefined;
+    if (selectedVersionId) {
+      const found = selectedAsset.imageVersions.find((v) => v.id === selectedVersionId);
+      if (found) return found;
+    }
+    return selectedAsset.imageVersions[0];
+  }, [selectedAsset, selectedVersionId]);
+
+  // For comparison: original vs selected version (or latest generated)
+  const originalVersion = selectedAsset?.imageVersions.find((v) => v.versionType === "original");
+  const compareVersion = selectedVersion ?? selectedAsset?.imageVersions[0];
+  const hasGeneratedVersion = Boolean(compareVersion) && compareVersion?.versionType !== "original";
 
   useEffect(() => {
     if (!project || project.imageAssets.length === 0) return;
@@ -360,7 +464,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
     if (!activePresetId && presets[0]) setActivePresetId(presets[0].id);
   }, [activePresetId, presets, project, selectedAssetId, setActivePresetId, setSelectedAsset]);
 
-  // Sync preset → slider values
+  // Sync preset → sliders
   useEffect(() => {
     if (!activePresetId || customPromptEnabled) return;
     const preset = presets.find((p) => p.id === activePresetId);
@@ -390,39 +494,22 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
         label: selectedAsset.originalFileName,
         progress: 35,
         status: "processing",
-        message: `${effectiveProvider ? t(`provider.${effectiveProvider.name}.label`, language) : t("workspace.provider", language)} ${t("workspace.generationRunning", language)}`,
+        message: `${effectiveProvider ? effectiveProvider.model ?? effectiveProvider.name : "AI"} — ${language === "hu" ? "generálás folyamatban" : "generating"}`,
       });
     },
     onSuccess: () => {
       if (selectedAsset) {
-        upsertQueueEntry({
-          id: selectedAsset.id,
-          label: selectedAsset.originalFileName,
-          progress: 100,
-          status: "completed",
-          message: t("workspace.generationSaved", language),
-        });
+        upsertQueueEntry({ id: selectedAsset.id, label: selectedAsset.originalFileName, progress: 100, status: "completed", message: t("workspace.generationSaved", language) });
       }
       toast.success(t("workspace.generationCompleted", language));
       queryClient.invalidateQueries({ queryKey: ["project", projectId] });
     },
     onError: (error) => {
       if (error instanceof ApiError) {
-        setGenerationFallback({
-          message: error.message,
-          retryable: Boolean(error.retryable),
-          canFallbackToMock: Boolean(error.canFallbackToMock),
-          fallbackProvider: error.fallbackProvider,
-        });
+        setGenerationFallback({ message: error.message, retryable: Boolean(error.retryable), canFallbackToMock: Boolean(error.canFallbackToMock), fallbackProvider: error.fallbackProvider });
       }
       if (selectedAsset) {
-        upsertQueueEntry({
-          id: selectedAsset.id,
-          label: selectedAsset.originalFileName,
-          progress: 100,
-          status: "failed",
-          message: error instanceof Error ? error.message : t("workspace.generationFailed", language),
-        });
+        upsertQueueEntry({ id: selectedAsset.id, label: selectedAsset.originalFileName, progress: 100, status: "failed", message: error instanceof Error ? error.message : t("workspace.generationFailed", language) });
       }
       toast.error(error instanceof Error ? error.message : t("workspace.generationFailed", language));
     },
@@ -436,52 +523,38 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
       const response = await fetch("/api/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          imageVersionId: selectedVersion.id,
-          format: "png",
-          quality: 95,
-          filenameSuffix: "final",
-          retainMetadata: true,
-        }),
+        body: JSON.stringify({ imageVersionId: selectedVersion.id, format: "png", quality: 95, filenameSuffix: "final", retainMetadata: true }),
       });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body.error ?? t("workspace.exportFailed", language));
-      }
+      if (!response.ok) { const b = await response.json().catch(() => ({})); throw new Error(b.error ?? t("workspace.exportFailed", language)); }
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `${selectedAsset?.originalFileName ?? "render"}-final.png`;
-      anchor.click();
+      const a = document.createElement("a");
+      a.href = url; a.download = `${selectedAsset?.originalFileName ?? "render"}-final.png`; a.click();
       URL.revokeObjectURL(url);
     },
     onSuccess: () => toast.success(t("workspace.exportPrepared", language)),
-    onError: (error) =>
-      toast.error(error instanceof Error ? error.message : t("workspace.exportFailed", language)),
+    onError: (err) => toast.error(err instanceof Error ? err.message : t("workspace.exportFailed", language)),
   });
 
   const latestLog = selectedAsset?.generationLogs[0];
-  const previewSource = selectedVersion?.fileUrl ?? selectedAsset?.storedFileUrl;
-  const generatedSource = compareVersion?.fileUrl ?? previewSource;
-  const hasGeneratedVersion = Boolean(compareVersion) && compareVersion?.versionType !== "original";
+  const referenceUrl = selectedAsset?.storedFileUrl;
+  const displayUrl = selectedVersion?.fileUrl ?? referenceUrl;
+  const isGenerating = generateMutation.isPending;
 
-  // CSS filter applied to the live result panel
-  const cssFilter = useMemo(() => buildCssFilter(editor), [editor]);
-
-  // Comparison panel
+  // Comparison: show original vs selected version
   const comparisonPanel = useMemo(() => {
-    if (!previewSource || !generatedSource) return null;
+    if (!referenceUrl) return null;
+    const afterUrl = hasGeneratedVersion && compareVersion?.fileUrl ? compareVersion.fileUrl : displayUrl;
     return (
       <ComparisonView
-        before={selectedAsset?.storedFileUrl ?? previewSource}
-        after={generatedSource}
+        before={originalVersion?.fileUrl ?? referenceUrl}
+        after={afterUrl ?? referenceUrl}
         mode="slider"
         beforeLabel={language === "hu" ? "Eredeti render" : "Original render"}
         afterLabel={language === "hu" ? "AI-javított eredmény" : "AI-enhanced result"}
       />
     );
-  }, [generatedSource, previewSource, selectedAsset?.storedFileUrl, language]);
+  }, [referenceUrl, hasGeneratedVersion, compareVersion, displayUrl, originalVersion, language]);
 
   return (
     <AppFrame
@@ -498,14 +571,14 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
         {/* ── LEFT: Asset list ─────────────────────────────────────────────── */}
         <Card className="surface-panel flex flex-col overflow-hidden">
           <CardHeader className="shrink-0 pb-3">
-            <CardTitle className="text-sm">{t("workspace.projectFiles", language)}</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm">{t("workspace.projectFiles", language)}</CardTitle>
+              <CompactUploadButton projectId={projectId} />
+            </div>
             <CardDescription className="text-xs">
               {project?.clientName || t("common.localFirstWorkspace", language)}
             </CardDescription>
           </CardHeader>
-          <div className="shrink-0 px-4 pb-3">
-            <UploadDropzone projectId={projectId} compact />
-          </div>
           <div className="min-h-0 flex-1 overflow-hidden px-4 pb-4">
             <ScrollArea className="h-full">
               <div className="flex flex-col gap-2 pr-1">
@@ -527,37 +600,17 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                         : "surface-subtle hover:border-[color:var(--border-default)]"
                     }`}
                   >
-                    {/* Thumbnail */}
                     <div className="relative h-28 w-full bg-black/30">
-                      <Image
-                        src={asset.previewUrl}
-                        alt={asset.originalFileName}
-                        fill
-                        unoptimized
-                        sizes="240px"
-                        className="object-cover"
-                      />
+                      <Image src={asset.previewUrl} alt={asset.originalFileName} fill unoptimized sizes="240px" className="object-cover" />
                     </div>
-                    {/* Meta */}
                     <div className="px-3 py-2.5">
-                      <div className="truncate text-sm font-medium text-white leading-tight">
-                        {asset.originalFileName}
-                      </div>
-                      <div className="mt-1.5 text-xs text-muted-foreground">
-                        {asset.width} × {asset.height}
-                      </div>
+                      <div className="truncate text-sm font-medium text-white leading-tight">{asset.originalFileName}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">{asset.width} × {asset.height}</div>
                       <div className="mt-2 flex items-center gap-1.5 flex-wrap">
                         <Badge variant="outline" className="text-[0.6rem] px-1.5 py-0">
                           {asset.imageVersions.length} {t("common.versions", language)}
                         </Badge>
-                        <Badge
-                          variant="outline"
-                          className={`text-[0.6rem] px-1.5 py-0 flex items-center gap-1 ${
-                            asset.status === "ready"
-                              ? "border-emerald-500/30 text-emerald-400"
-                              : "border-zinc-600 text-zinc-500"
-                          }`}
-                        >
+                        <Badge variant="outline" className={`text-[0.6rem] px-1.5 py-0 flex items-center gap-1 ${asset.status === "ready" ? "border-emerald-500/30 text-emerald-400" : "border-zinc-600 text-zinc-500"}`}>
                           <div className={`size-1 rounded-full ${asset.status === "ready" ? "bg-emerald-400" : "bg-zinc-500"}`} />
                           {asset.status}
                         </Badge>
@@ -585,32 +638,19 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
 
             <div className="h-4 w-px bg-white/10" />
 
-            <Button
-              size="sm"
-              onClick={() => generateMutation.mutate(undefined)}
-              disabled={
-                !selectedAsset ||
-                (!customPromptEnabled && !activePresetId) ||
-                (customPromptEnabled && !customPromptText.trim()) ||
-                generateMutation.isPending
-              }
-            >
-              <ScanSearch data-icon="inline-start" />
-              {generateMutation.isPending ? t("common.loading", language) : t("workspace.generate", language)}
-            </Button>
-
+            {/* Compare toggle */}
             <Button
               variant="outline"
               size="sm"
               onClick={() => startTransition(() => setCompareEnabled(!compareEnabled))}
-              disabled={!compareVersion || !hasGeneratedVersion}
+              disabled={!hasGeneratedVersion}
               className={compareEnabled ? "border-blue-500/40 bg-blue-500/10 text-blue-300" : ""}
             >
               <SplitSquareVertical data-icon="inline-start" />
               {compareEnabled ? t("workspace.hideCompare", language) : t("common.compare", language)}
             </Button>
 
-            {/* Provider pill — no label, just model */}
+            {/* Provider pill */}
             <div className="ml-auto flex min-w-0 items-center gap-2 rounded-full border border-white/10 bg-white/4 px-3 py-1 text-xs text-zinc-400">
               <div className="size-1.5 rounded-full bg-blue-400" />
               {effectiveProvider?.model ? (
@@ -625,32 +665,21 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
               ) : null}
             </div>
 
-            {/* Export — destination dropdown + download button */}
+            {/* Export */}
             <div className="flex items-center gap-1">
-              <Select
-                value={exportDestination}
-                onValueChange={(value) => setExportDestination(normalizeExportDestination(value))}
-              >
+              <Select value={exportDestination} onValueChange={(v) => setExportDestination(normalizeExportDestination(v))}>
                 <SelectTrigger size="sm" className="h-8 min-w-[110px] text-xs">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent align="end">
                   <SelectGroup>
                     {EXPORT_DESTINATIONS.map((dest) => (
-                      <SelectItem key={dest.id} value={dest.id}>
-                        {t(dest.labelKey, language)}
-                      </SelectItem>
+                      <SelectItem key={dest.id} value={dest.id}>{t(dest.labelKey, language)}</SelectItem>
                     ))}
                   </SelectGroup>
                 </SelectContent>
               </Select>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => exportMutation.mutate()}
-                disabled={!selectedVersion || exportMutation.isPending}
-                className="h-8"
-              >
+              <Button size="sm" variant="outline" onClick={() => exportMutation.mutate()} disabled={!selectedVersion || exportMutation.isPending} className="h-8">
                 <Download className="size-3.5" />
               </Button>
             </div>
@@ -667,93 +696,57 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
           </div>
 
           <div className="flex min-h-0 flex-1 flex-col gap-4 pt-4">
-            {/* Generation fallback banner */}
+            {/* Fallback banner */}
             {generationFallback ? (
               <div className="rounded-[24px] border border-amber-400/20 bg-amber-500/10 px-4 py-4">
-                <div className="text-sm font-medium text-amber-100">
-                  {t("workspace.generationUnavailableTitle", language)}
-                </div>
+                <div className="text-sm font-medium text-amber-100">{t("workspace.generationUnavailableTitle", language)}</div>
                 <p className="mt-2 text-sm leading-6 text-amber-50/85">{generationFallback.message}</p>
                 <div className="mt-4 flex flex-wrap gap-3">
                   {generationFallback.retryable && (
-                    <Button variant="outline" size="sm" onClick={() => generateMutation.mutate(undefined)} disabled={generateMutation.isPending}>
-                      {t("workspace.retryWithOpenAi", language)}
-                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => generateMutation.mutate(undefined)} disabled={isGenerating}>{t("workspace.retryWithOpenAi", language)}</Button>
                   )}
                   {generationFallback.canFallbackToMock && (
-                    <Button size="sm" onClick={() => generateMutation.mutate(generationFallback.fallbackProvider ?? "mock-local")} disabled={generateMutation.isPending}>
-                      {t("workspace.runWithMock", language)}
-                    </Button>
+                    <Button size="sm" onClick={() => generateMutation.mutate(generationFallback.fallbackProvider ?? "mock-local")} disabled={isGenerating}>{t("workspace.runWithMock", language)}</Button>
                   )}
                 </div>
               </div>
             ) : null}
 
-            {/* ── LIVE RESULT / COMPARISON — TOP (full width) ─────────────── */}
-            <div className="relative min-h-[22rem] flex-1">
+            {/* ── MAIN CANVAS: comparison slider OR original reference ─────── */}
+            <div className="relative min-h-0 flex-1">
+              <AnimatePresence>
+                {isGenerating && <GeneratingOverlay language={language} />}
+              </AnimatePresence>
               {isLoading ? (
                 <div className="h-full rounded-[28px] bg-white/5 animate-pulse" />
               ) : compareEnabled && hasGeneratedVersion ? (
                 comparisonPanel
               ) : (
-                /* Live result with CSS filter applied */
-                <div className="relative h-full overflow-hidden rounded-[28px] border border-white/8 bg-[#0a0d14]">
-                  <div className="flex items-center justify-between border-b border-white/8 px-4 py-2.5">
-                    <span className="text-xs font-medium uppercase tracking-[0.16em] text-zinc-500">
-                      {language === "hu" ? "Élő előnézet" : "Live preview"}
-                    </span>
-                    {hasGeneratedVersion && compareVersion && (
+                <ZoomableImagePanel
+                  src={displayUrl}
+                  alt={language === "hu" ? "Előnézet" : "Preview"}
+                  label={language === "hu" ? "Előnézet" : "Preview"}
+                  badge={
+                    selectedVersion && hasGeneratedVersion ? (
                       <Badge variant="outline" className="border-violet-500/30 bg-violet-500/10 text-violet-300 text-[0.65rem]">
-                        {formatVersionLabel(compareVersion.versionType, language)}
+                        {formatVersionLabel(selectedVersion.versionType, language)}
                       </Badge>
-                    )}
-                  </div>
-                  <div className="relative h-[calc(100%-2.5rem)]">
-                    {previewSource ? (
-                      <Image
-                        src={hasGeneratedVersion && generatedSource ? generatedSource : previewSource}
-                        alt="live preview"
-                        fill
-                        unoptimized
-                        sizes="100vw"
-                        className="object-contain"
-                        style={{ filter: cssFilter }}
-                      />
-                    ) : (
-                      <div className="flex h-full flex-col items-center justify-center gap-3">
-                        <div className="flex size-12 items-center justify-center rounded-[18px] border border-white/8 bg-white/4">
-                          <ImageIcon className="size-5 text-zinc-600" />
-                        </div>
-                        <p className="text-xs text-zinc-600">{t("workspace.generate", language)}</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                    ) : undefined
+                  }
+                  emptyText={language === "hu" ? "Tölts fel egy képet" : "Upload an image"}
+                  className="h-full"
+                />
               )}
             </div>
 
-            {/* ── ORIGINAL + LATEST GENERATED — BOTTOM (two columns) ──────── */}
-            <div className="grid gap-4 lg:grid-cols-2">
-              <ZoomableImagePanel
-                src={selectedAsset?.storedFileUrl}
-                alt={t("workspace.originalReference", language)}
-                label={t("workspace.originalReference", language)}
-                emptyText={t("workspace.projectFiles", language)}
-              />
-              <ZoomableImagePanel
-                src={hasGeneratedVersion && generatedSource ? generatedSource : previewSource}
-                alt={t("workspace.latestOutput", language)}
-                label={t("workspace.latestOutput", language)}
-                badge={
-                  compareVersion && hasGeneratedVersion ? (
-                    <Badge variant="outline" className="border-violet-500/30 bg-violet-500/10 text-violet-300 text-[0.65rem]">
-                      {formatVersionLabel(compareVersion.versionType, language)}
-                    </Badge>
-                  ) : undefined
-                }
-                emptyText={t("workspace.generate", language)}
-              />
-            </div>
+            {/* ── ORIGINAL REFERENCE (bottom) ──────────────────────────────── */}
+            <ZoomableImagePanel
+              src={referenceUrl}
+              alt={t("workspace.originalReference", language)}
+              label={t("workspace.originalReference", language)}
+              emptyText={t("workspace.projectFiles", language)}
+              className="shrink-0"
+            />
 
             {/* Queue status bar */}
             <div className="rounded-[20px] border border-white/8 bg-[#0a0d14] px-4 py-3 shrink-0">
@@ -774,16 +767,11 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                   {queue[0]?.message || latestLog?.status || t("common.idle", language)}
                 </span>
               </div>
-              <ProgressMeter
-                value={queue[0]?.progress ?? (generateMutation.isPending ? 55 : 0)}
-                className="mt-2"
-              />
+              <ProgressMeter value={queue[0]?.progress ?? (isGenerating ? 55 : 0)} className="mt-2" />
               {latestLog ? (
                 <div className="mt-2 flex items-center justify-between font-mono text-[0.65rem] text-zinc-600">
                   <span>{latestLog.processingTime} ms</span>
-                  <span>
-                    {latestLog.success ? "✓" : latestLog.errorMessage || t("common.retryNeeded", language)}
-                  </span>
+                  <span>{latestLog.success ? "✓" : latestLog.errorMessage || t("common.retryNeeded", language)}</span>
                 </div>
               ) : null}
             </div>
@@ -834,7 +822,10 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                         <button
                           key={version.id}
                           type="button"
-                          onClick={() => setSelectedAsset(selectedAsset.id, version.id)}
+                          onClick={() => {
+                            // Functional: update both asset and version in store
+                            setSelectedAsset(selectedAsset.id, version.id);
+                          }}
                           className={`flex items-center justify-between rounded-[18px] border px-3 py-2.5 text-left transition ${
                             isActive
                               ? "border-blue-500/40 bg-blue-500/10"
@@ -842,9 +833,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                           }`}
                         >
                           <div className="flex items-center gap-2.5">
-                            <div className={`flex size-8 items-center justify-center rounded-[12px] border ${
-                              isActive ? "border-blue-500/30 bg-blue-500/15" : "border-white/10 bg-white/5"
-                            }`}>
+                            <div className={`flex size-8 items-center justify-center rounded-[12px] border ${isActive ? "border-blue-500/30 bg-blue-500/15" : "border-white/10 bg-white/5"}`}>
                               <ImageIcon className={`size-3.5 ${isActive ? "text-blue-400" : "text-zinc-500"}`} />
                             </div>
                             <div>
@@ -867,6 +856,28 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                         </button>
                       );
                     })}
+                  </div>
+
+                  <Separator />
+
+                  {/* ── AUTO ENHANCE BUTTON ───────────────────────────────── */}
+                  <div className="flex flex-col gap-2">
+                    <Button
+                      size="default"
+                      onClick={() => generateMutation.mutate(undefined)}
+                      disabled={!selectedAsset || !activePresetId || isGenerating || customPromptEnabled}
+                      className="w-full bg-gradient-to-r from-blue-600 to-violet-600 hover:from-blue-500 hover:to-violet-500 text-white font-semibold shadow-lg shadow-blue-500/20 border-0 h-11"
+                    >
+                      <Sparkles className="size-4 mr-2" />
+                      {isGenerating
+                        ? (language === "hu" ? "Generálás…" : "Generating…")
+                        : (language === "hu" ? "Automatikus javítás" : "Auto enhance")}
+                    </Button>
+                    <p className="text-[0.65rem] text-zinc-600 text-center">
+                      {language === "hu"
+                        ? "Az aktív preset és beállítások alapján"
+                        : "Based on active preset and settings"}
+                    </p>
                   </div>
 
                   <Separator />
@@ -896,16 +907,14 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                     </Select>
                   </div>
 
-                  {/* ── SLIDERS (hidden when custom prompt is on) ─────────── */}
+                  {/* ── SLIDERS ───────────────────────────────────────────── */}
                   {!customPromptEnabled && (
                     <div className="flex flex-col gap-3">
                       {sliderControls.map((control) => (
                         <div key={control.key} className="flex flex-col gap-2">
                           <div className="flex items-center justify-between text-sm text-zinc-200">
                             <span>{t(control.labelKey, language)}</span>
-                            <span className="text-zinc-500">
-                              {String(editor[control.key as keyof typeof editor])}
-                            </span>
+                            <span className="text-zinc-500">{String(editor[control.key as keyof typeof editor])}</span>
                           </div>
                           <Slider
                             value={[Number(editor[control.key as keyof typeof editor])]}
@@ -927,30 +936,17 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                   {/* ── CUSTOM PROMPT TOGGLE ──────────────────────────────── */}
                   <div className="flex flex-col gap-3">
                     <label className="flex cursor-pointer items-center gap-3">
-                      <div className="relative">
-                        <input
-                          type="checkbox"
-                          className="sr-only"
-                          checked={customPromptEnabled}
-                          onChange={(e) => setCustomPromptEnabled(e.target.checked)}
-                        />
-                        <div className={`h-5 w-9 rounded-full border transition-colors ${
-                          customPromptEnabled
-                            ? "border-blue-500/50 bg-blue-500"
-                            : "border-white/20 bg-white/10"
-                        }`} />
-                        <div className={`absolute top-0.5 size-4 rounded-full bg-white shadow transition-transform ${
-                          customPromptEnabled ? "translate-x-4" : "translate-x-0.5"
-                        }`} />
+                      <div className="relative shrink-0">
+                        <input type="checkbox" className="sr-only" checked={customPromptEnabled} onChange={(e) => setCustomPromptEnabled(e.target.checked)} />
+                        <div className={`h-5 w-9 rounded-full border transition-colors ${customPromptEnabled ? "border-blue-500/50 bg-blue-500" : "border-white/20 bg-white/10"}`} />
+                        <div className={`absolute top-0.5 size-4 rounded-full bg-white shadow transition-transform ${customPromptEnabled ? "translate-x-4" : "translate-x-0.5"}`} />
                       </div>
                       <div>
                         <div className="text-sm font-medium text-zinc-200">
                           {language === "hu" ? "Saját prompt" : "Custom prompt"}
                         </div>
                         <div className="text-xs text-zinc-500">
-                          {language === "hu"
-                            ? "A preset és a sliderek helyett saját utasítást adok meg"
-                            : "Override preset and sliders with your own instruction"}
+                          {language === "hu" ? "Preset és sliderek helyett saját utasítás" : "Override preset and sliders"}
                         </div>
                       </div>
                     </label>
@@ -960,21 +956,19 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                         <Textarea
                           value={customPromptText}
                           onChange={(e) => setCustomPromptText(e.target.value)}
-                          placeholder={
-                            language === "hu"
-                              ? "Pl. Tedd fotórealisztikussá az épületet, tartsd meg a geometriát, adj hozzá természetes fényt és fákat..."
-                              : "E.g. Make the building photorealistic, preserve geometry, add natural lighting and trees..."
-                          }
+                          placeholder={language === "hu"
+                            ? "Pl. Tedd fotórealisztikussá az épületet, tartsd meg a geometriát, adj hozzá természetes fényt és fákat..."
+                            : "E.g. Make the building photorealistic, preserve geometry, add natural lighting and trees..."}
                           className="min-h-[100px] resize-none text-sm"
                         />
                         <Button
                           size="sm"
                           onClick={() => generateMutation.mutate(undefined)}
-                          disabled={!selectedAsset || !customPromptText.trim() || generateMutation.isPending}
+                          disabled={!selectedAsset || !customPromptText.trim() || isGenerating}
                           className="w-full"
                         >
                           <ScanSearch data-icon="inline-start" />
-                          {generateMutation.isPending
+                          {isGenerating
                             ? t("common.loading", language)
                             : (language === "hu" ? "Generálás saját prompttal" : "Generate with custom prompt")}
                         </Button>

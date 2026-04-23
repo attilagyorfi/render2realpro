@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowRight,
   FolderKanban,
@@ -48,6 +49,8 @@ const stagger = {
 
 export function ProjectsView() {
   const language = useAppPreferencesStore((state) => state.language);
+  const [createOpen, setCreateOpen] = useState(false);
+
   const { data, isLoading } = useQuery({
     queryKey: ["projects"],
     queryFn: () => fetchJson<ProjectsResponse>("/api/projects"),
@@ -72,26 +75,20 @@ export function ProjectsView() {
                 {/* Architectural grid illustration */}
                 <div className="flex h-32 items-center justify-start">
                   <svg width="220" height="110" viewBox="0 0 220 110" fill="none" className="opacity-60">
-                    {/* Building outline */}
                     <rect x="20" y="30" width="80" height="70" stroke="#3b82f6" strokeWidth="1.5" fill="none" />
                     <rect x="30" y="45" width="15" height="20" stroke="#3b82f6" strokeWidth="1" fill="rgba(59,130,246,0.08)" />
                     <rect x="55" y="45" width="15" height="20" stroke="#3b82f6" strokeWidth="1" fill="rgba(59,130,246,0.08)" />
                     <rect x="30" y="75" width="15" height="25" stroke="#3b82f6" strokeWidth="1" fill="rgba(59,130,246,0.08)" />
                     <rect x="55" y="75" width="25" height="25" stroke="#3b82f6" strokeWidth="1" fill="rgba(59,130,246,0.08)" />
-                    {/* Roof line */}
                     <line x1="10" y1="30" x2="110" y2="30" stroke="#3b82f6" strokeWidth="1" strokeDasharray="4 3" />
-                    {/* Arrow — render to real */}
                     <line x1="115" y1="65" x2="145" y2="65" stroke="#60a5fa" strokeWidth="2" />
                     <path d="M140 60 L148 65 L140 70" stroke="#60a5fa" strokeWidth="2" fill="none" strokeLinecap="round" />
-                    {/* Photorealistic box */}
                     <rect x="150" y="30" width="60" height="70" rx="6" stroke="#818cf8" strokeWidth="1.5" fill="rgba(129,140,248,0.06)" />
                     <rect x="158" y="40" width="12" height="15" rx="2" stroke="#818cf8" strokeWidth="1" fill="rgba(129,140,248,0.12)" />
                     <rect x="176" y="40" width="12" height="15" rx="2" stroke="#818cf8" strokeWidth="1" fill="rgba(129,140,248,0.12)" />
                     <rect x="158" y="62" width="12" height="22" rx="2" stroke="#818cf8" strokeWidth="1" fill="rgba(129,140,248,0.12)" />
                     <rect x="176" y="62" width="20" height="22" rx="2" stroke="#818cf8" strokeWidth="1" fill="rgba(129,140,248,0.12)" />
-                    {/* Ground line */}
                     <line x1="10" y1="100" x2="210" y2="100" stroke="rgba(255,255,255,0.1)" strokeWidth="1" />
-                    {/* Dots */}
                     <circle cx="20" cy="30" r="2.5" fill="#3b82f6" />
                     <circle cx="100" cy="30" r="2.5" fill="#3b82f6" />
                     <circle cx="150" cy="30" r="2.5" fill="#818cf8" />
@@ -101,9 +98,17 @@ export function ProjectsView() {
 
                 <div>
                   <div className="flex items-center gap-2 mb-3">
-                    <div className="flex size-8 items-center justify-center rounded-[12px] border border-blue-500/30 bg-blue-500/10">
-                      <Plus className="size-4 text-blue-400" />
-                    </div>
+                    {/* Clickable + button to open/close create form */}
+                    <button
+                      type="button"
+                      onClick={() => setCreateOpen((o) => !o)}
+                      title={language === "hu" ? "Új projekt létrehozása" : "Create new project"}
+                      className="flex size-8 items-center justify-center rounded-[12px] border border-blue-500/30 bg-blue-500/10 transition hover:bg-blue-500/20 hover:border-blue-400/50 hover:shadow-[0_0_12px_rgba(59,130,246,0.3)]"
+                    >
+                      <motion.div animate={{ rotate: createOpen ? 45 : 0 }} transition={{ duration: 0.2 }}>
+                        <Plus className="size-4 text-blue-400" />
+                      </motion.div>
+                    </button>
                     <span className="text-xs uppercase tracking-[0.18em] text-zinc-500">
                       {language === "hu" ? "Új projekt" : "New project"}
                     </span>
@@ -116,10 +121,20 @@ export function ProjectsView() {
                 </div>
               </div>
 
-              {/* Right — form */}
-              <div className="flex items-start">
-                <ProjectCreateForm />
-              </div>
+              {/* Right — form (animated, opens on + click) */}
+              <AnimatePresence>
+                {createOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, x: 24, scale: 0.97 }}
+                    animate={{ opacity: 1, x: 0, scale: 1 }}
+                    exit={{ opacity: 0, x: 24, scale: 0.97 }}
+                    transition={{ duration: 0.25 }}
+                    className="flex items-start"
+                  >
+                    <ProjectCreateForm onCreated={() => setCreateOpen(false)} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
         </motion.div>
@@ -144,16 +159,12 @@ export function ProjectsView() {
             <CardContent className="grid gap-3">
               {isLoading
                 ? Array.from({ length: 3 }).map((_, index) => (
-                    <div
-                      key={index}
-                      className="surface-subtle h-32 rounded-[22px] animate-pulse"
-                    />
+                    <div key={index} className="surface-subtle h-32 rounded-[22px] animate-pulse" />
                   ))
                 : null}
 
               {!isLoading && projects.length === 0 ? (
                 <div className="surface-subtle rounded-[22px] px-5 py-8 text-center">
-                  {/* Empty state illustration */}
                   <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-[20px] border border-white/10 bg-white/5">
                     <FolderKanban className="size-6 text-zinc-500" />
                   </div>
@@ -168,7 +179,6 @@ export function ProjectsView() {
 
               {!isLoading
                 ? projects.map((project, i) => {
-                    // Collect all generated versions across all assets
                     const allVersions = project.imageAssets.flatMap(
                       (asset) => asset.generatedVersions ?? []
                     );
@@ -184,7 +194,6 @@ export function ProjectsView() {
                       >
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-3">
-                            {/* Project icon */}
                             <div className="flex size-10 shrink-0 items-center justify-center rounded-[14px] border border-white/10 bg-white/5">
                               <Layers className="size-4 text-zinc-400" />
                             </div>
@@ -223,7 +232,6 @@ export function ProjectsView() {
                           </div>
                         </div>
 
-                        {/* Versions preview — show all saved versions as small chips */}
                         {versionCount > 0 && (
                           <div className="flex flex-wrap gap-1.5 lg:max-w-[200px]">
                             {allVersions.slice(0, 4).map((v) => (

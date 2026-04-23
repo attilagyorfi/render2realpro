@@ -18,7 +18,11 @@ type ProjectFormValues = {
   clientName?: string;
 };
 
-export function ProjectCreateForm() {
+type Props = {
+  onCreated?: () => void;
+};
+
+export function ProjectCreateForm({ onCreated }: Props) {
   const queryClient = useQueryClient();
   const language = useAppPreferencesStore((state) => state.language);
   const form = useForm<ProjectFormValues>({
@@ -40,6 +44,7 @@ export function ProjectCreateForm() {
       form.reset();
       queryClient.invalidateQueries({ queryKey: ["projects"] });
       toast.success(t("project.created", language));
+      onCreated?.();
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : t("project.createError", language));
