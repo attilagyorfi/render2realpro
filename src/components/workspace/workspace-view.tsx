@@ -9,11 +9,14 @@ import {
   Download,
   FolderOpen,
   Image as ImageIcon,
+  Maximize2,
+  Minimize2,
   PanelRightClose,
   Plus,
   ScanSearch,
   Sparkles,
   SplitSquareVertical,
+  X,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -167,6 +170,8 @@ function ZoomableImagePanel({
   badge,
   emptyText,
   className = "",
+  filterStyle,
+  onFullscreen,
 }: {
   src?: string;
   alt: string;
@@ -174,6 +179,8 @@ function ZoomableImagePanel({
   badge?: React.ReactNode;
   emptyText: string;
   className?: string;
+  filterStyle?: string;
+  onFullscreen?: () => void;
 }) {
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -220,6 +227,16 @@ function ZoomableImagePanel({
               {zoom > 1 && (
                 <button type="button" onClick={resetZoom} className="ml-1 rounded-md px-1.5 py-0.5 text-[0.6rem] text-zinc-500 hover:text-zinc-300 border border-white/10 transition">reset</button>
               )}
+              {onFullscreen && (
+                <button
+                  type="button"
+                  onClick={onFullscreen}
+                  title="Teljes képernyő"
+                  className="ml-1 flex size-5 items-center justify-center rounded-md text-zinc-500 hover:text-zinc-300 transition border border-white/10"
+                >
+                  <Maximize2 className="size-3" />
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -238,7 +255,16 @@ function ZoomableImagePanel({
             className="absolute inset-0"
             style={{ transform: `scale(${zoom}) translate(${offset.x / zoom}px, ${offset.y / zoom}px)`, transformOrigin: "center center" }}
           >
-            <Image src={src} alt={alt} fill unoptimized sizes="50vw" className="object-contain" draggable={false} />
+            <Image
+              src={src}
+              alt={alt}
+              fill
+              unoptimized
+              sizes="50vw"
+              className="object-contain"
+              draggable={false}
+              style={filterStyle ? { filter: filterStyle } : undefined}
+            />
           </div>
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3">
@@ -369,7 +395,7 @@ function GeneratingOverlay({ language }: { language: string }) {
       </div>
       <div className="flex flex-col items-center gap-2">
         <p className="text-sm font-medium text-zinc-200">
-          {language === "hu" ? "AI generálás folyamatban…" : "AI generation in progress…"}
+          {language === "hu" ? "Generálás folyamatban…" : "Generation in progress…"}
         </p>
         <p className="text-xs text-zinc-500">
           {language === "hu" ? "Ez 30–90 másodpercet vehet igénybe" : "This may take 30–90 seconds"}
@@ -406,6 +432,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
     canFallbackToMock: boolean;
     fallbackProvider?: string | null;
   } | null>(null);
+  const [fullscreenOpen, setFullscreenOpen] = useState(false);
 
   const {
     selectedAssetId,
@@ -541,6 +568,27 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
   const displayUrl = selectedVersion?.fileUrl ?? referenceUrl;
   const isGenerating = generateMutation.isPending;
 
+  // Compute CSS filter string from editor values for live preview
+  const filterStyle = useMemo(() => {
+    const b = editor.brightness ?? 100;
+    const c = editor.contrast ?? 100;
+    const s = editor.saturation ?? 100;
+    const sh = editor.sharpen ?? 0;
+    const haze = editor.dehaze ?? 0;
+    const temp = editor.temperature ?? 0;
+    const vignette = editor.vignette ?? 0;
+    const parts: string[] = [];
+    if (b !== 100) parts.push(`brightness(${b / 100})`);
+    if (c !== 100) parts.push(`contrast(${c / 100})`);
+    if (s !== 100) parts.push(`saturate(${s / 100})`);
+    if (sh > 0) parts.push(`contrast(${1 + sh * 0.003})`);
+    if (haze > 0) parts.push(`blur(${haze * 0.02}px)`);
+    if (temp > 0) parts.push(`sepia(${temp * 0.003})`);
+    else if (temp < 0) parts.push(`hue-rotate(${temp * 0.2}deg)`);
+    if (vignette > 0) parts.push(`brightness(${1 - vignette * 0.002})`);
+    return parts.length > 0 ? parts.join(" ") : undefined;
+  }, [editor]);
+
   // Comparison: show original vs selected version
   const comparisonPanel = useMemo(() => {
     if (!referenceUrl) return null;
@@ -557,6 +605,75 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
   }, [referenceUrl, hasGeneratedVersion, compareVersion, displayUrl, originalVersion, language]);
 
   return (
+    <>
+      {/* ── FULLSCREEN OVERLAY ───────────────────────────────────────────── */}
+      <AnimatePresence>
+        {fullscreenOpen && (
+          <motion.div
+            key="fullscreen"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex flex-col bg-[#07090e]"
+          >
+            {/* Header */}
+            <div className="flex shrink-0 items-center justify-between border-b border-white/8 px-6 py-3">
+              <span className="text-sm font-medium text-zinc-300">
+                {language === "hu" ? "Teljes képernyős nézet" : "Fullscreen view"}
+              </span>
+              <div className="flex items-center gap-3">
+                {/* Mini controls in fullscreen */}
+                {!customPromptEnabled && (
+                  <div className="flex items-center gap-3">
+                    {sliderControls.slice(0, 3).map((ctrl) => (
+                      <div key={ctrl.key} className="flex items-center gap-2">
+                        <span className="text-xs text-zinc-500">{t(ctrl.labelKey, language)}</span>
+                        <Slider
+                          value={[Number(editor[ctrl.key as keyof typeof editor])]}
+                          min={ctrl.min}
+                          max={ctrl.max}
+                          step={1}
+                          className="w-24"
+                          onValueChange={(v) => setEditorValue(ctrl.key as keyof typeof editor, (Array.isArray(v) ? v[0] : v) as never)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setFullscreenOpen(false)}
+                  className="flex size-8 items-center justify-center rounded-[10px] border border-white/10 bg-white/5 text-zinc-400 transition hover:bg-white/10 hover:text-zinc-200"
+                >
+                  <Minimize2 className="size-4" />
+                </button>
+              </div>
+            </div>
+            {/* Content */}
+            <div className="min-h-0 flex-1 p-4">
+              {hasGeneratedVersion ? (
+                <ComparisonView
+                  before={originalVersion?.fileUrl ?? referenceUrl ?? ""}
+                  after={compareVersion?.fileUrl ?? displayUrl ?? ""}
+                  mode="slider"
+                  beforeLabel={language === "hu" ? "Eredeti render" : "Original render"}
+                  afterLabel={language === "hu" ? "AI-javított eredmény" : "AI-enhanced result"}
+                />
+              ) : (
+                <ZoomableImagePanel
+                  src={displayUrl}
+                  alt={language === "hu" ? "Előnézet" : "Preview"}
+                  label={language === "hu" ? "Előnézet" : "Preview"}
+                  emptyText={language === "hu" ? "Tölts fel egy képet" : "Upload an image"}
+                  filterStyle={filterStyle}
+                  className="h-full"
+                />
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     <AppFrame
       eyebrow={t("workspace.eyebrow", language)}
       title={project?.name ?? t("workspace.loadingTitle", language)}
@@ -734,21 +851,21 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                     ) : undefined
                   }
                   emptyText={language === "hu" ? "Tölts fel egy képet" : "Upload an image"}
+                  filterStyle={filterStyle}
+                  onFullscreen={() => setFullscreenOpen(true)}
                   className="h-full"
                 />
               )}
             </div>
-
-            {/* ── ORIGINAL REFERENCE (bottom) ──────────────────────────────── */}
+            {/* ── ORIGINAL REFERENCE (bottom) ──────────────────────────────────── */}
             <ZoomableImagePanel
               src={referenceUrl}
               alt={t("workspace.originalReference", language)}
               label={t("workspace.originalReference", language)}
               emptyText={t("workspace.projectFiles", language)}
+              onFullscreen={() => setFullscreenOpen(true)}
               className="shrink-0"
-            />
-
-            {/* Queue status bar */}
+            />           {/* Queue status bar */}
             <div className="rounded-[20px] border border-white/8 bg-[#0a0d14] px-4 py-3 shrink-0">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-xs text-zinc-500">
@@ -983,5 +1100,6 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
         ) : null}
       </div>
     </AppFrame>
+    </>
   );
 }

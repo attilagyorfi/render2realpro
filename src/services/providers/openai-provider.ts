@@ -42,13 +42,29 @@ export class OpenAiImageEditingProvider implements ProviderAdapter {
 
     const formData = new FormData();
     const prompt = [
-      input.prompt.presetName,
-      input.prompt.imageName,
+      // Core task
+      "TASK: Convert this architectural 3D render into a photorealistic image.",
+      // Preset and image context
+      input.prompt.presetName ? `Style preset: ${input.prompt.presetName}.` : "",
+      input.prompt.imageName ? `Image: ${input.prompt.imageName}.` : "",
       ...(input.prompt.customDirectives ?? []),
-      "Preserve exact composition, camera angle, geometry, facade layout, proportions, object placement, roads, rails, vegetation, vehicles, and scene layout.",
-      "No redesign. No geometry changes. No new people. No fantasy architecture. No camera changes.",
-      "Enhance realism through material fidelity, reflections, shadows, and believable weathering only.",
-    ].join(" ");
+      // STRICT GEOMETRY LOCK — highest priority instructions
+      "STRICT RULES (must follow exactly):",
+      "1. PRESERVE every structural element pixel-perfectly: building footprint, facade geometry, window positions, door positions, column spacing, roof shape, floor levels, balconies, overhangs, and all architectural details.",
+      "2. PRESERVE exact camera angle, focal length, perspective, and field of view — do NOT zoom, pan, tilt, or change the viewpoint by even 1 degree.",
+      "3. PRESERVE exact positions of all objects: roads, parking lots, railway tracks, vehicles, trucks, trees, shrubs, benches, fences, lighting poles, signage, and any site furniture.",
+      "4. PRESERVE exact proportions and scale of every element — no stretching, no scaling, no distortion.",
+      "5. DO NOT add, remove, or move any object, person, vehicle, or vegetation that is not already in the scene.",
+      "6. DO NOT redesign, simplify, or alter any architectural element.",
+      "7. DO NOT change the sky composition or lighting direction — only improve realism of existing lighting.",
+      // What IS allowed
+      "ALLOWED ENHANCEMENTS ONLY:",
+      "- Replace flat/plastic-looking materials with photorealistic textures (concrete, glass, metal, brick, wood, asphalt) while keeping exact shapes.",
+      "- Add realistic surface details: weathering, micro-texture, reflections, subsurface scattering on glass.",
+      "- Improve shadow quality and ambient occlusion to match real-world physics.",
+      "- Add subtle atmospheric depth (haze, sky gradient) without changing composition.",
+      "- Improve vegetation realism (leaf detail, bark texture) without moving or resizing plants.",
+    ].filter(Boolean).join(" ");
 
     formData.append("model", appEnv.openAiImageModel);
     formData.append("image", new File([imageBytes], path.basename(input.sourcePath), { type: sourceType }));
