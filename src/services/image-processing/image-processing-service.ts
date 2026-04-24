@@ -91,6 +91,8 @@ export async function createGenerationJob(input: GenerationRequestPayload) {
     const result = await provider.generateRealismPass({
       projectId: imageAsset.projectId,
       sourcePath: imageAsset.storedFilePath,
+      sourceWidth: imageAsset.width ?? undefined,
+      sourceHeight: imageAsset.height ?? undefined,
       prompt: {
         imageName: imageAsset.originalFileName,
         presetName: input.presetId ? preset.name : "custom",

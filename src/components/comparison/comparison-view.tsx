@@ -20,6 +20,7 @@ interface ComparisonViewProps {
   beforeLabel?: string;
   afterLabel?: string;
   className?: string;
+  afterFilterStyle?: string;
 }
 
 export function ComparisonView({
@@ -28,6 +29,7 @@ export function ComparisonView({
   beforeLabel = "Original render",
   afterLabel = "AI-enhanced result",
   className = "",
+  afterFilterStyle,
 }: ComparisonViewProps) {
   const [position, setPosition] = useState(50); // 0–100 %
   const [isDragging, setIsDragging] = useState(false);
@@ -111,6 +113,7 @@ export function ComparisonView({
             className="object-contain"
             draggable={false}
             priority
+            style={afterFilterStyle ? { filter: afterFilterStyle } : undefined}
           />
         ) : (
           <div className="flex h-full items-center justify-center">

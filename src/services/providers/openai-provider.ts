@@ -66,10 +66,24 @@ export class OpenAiImageEditingProvider implements ProviderAdapter {
       "- Improve vegetation realism (leaf detail, bark texture) without moving or resizing plants.",
     ].filter(Boolean).join(" ");
 
+    // Select output size that best preserves the source image aspect ratio.
+    // gpt-image-1 supports: 1024x1024, 1536x1024, 1024x1536, auto
+    const w = input.sourceWidth ?? 1;
+    const h = input.sourceHeight ?? 1;
+    const ratio = w / h;
+    let outputSize: string;
+    if (ratio > 1.2) {
+      outputSize = "1536x1024"; // landscape
+    } else if (ratio < 0.83) {
+      outputSize = "1024x1536"; // portrait
+    } else {
+      outputSize = "1024x1024"; // square
+    }
+
     formData.append("model", appEnv.openAiImageModel);
     formData.append("image", new File([imageBytes], path.basename(input.sourcePath), { type: sourceType }));
     formData.append("prompt", prompt);
-    formData.append("size", "1536x1024");
+    formData.append("size", outputSize);
     formData.append("quality", "medium");
 
     const response = await fetch("https://api.openai.com/v1/images/edits", {

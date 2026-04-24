@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  GripVertical,
   Image as ImageIcon,
   Maximize2,
   Minimize2,
@@ -14,10 +15,28 @@ import {
   ScanSearch,
   Sparkles,
   SplitSquareVertical,
+  Trash2,
   X,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "sonner";
 
@@ -329,7 +348,90 @@ function GeneratingOverlay({ language }: { language: string }) {
   );
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
+// ─── Sortable asset card ────────────────────────────────────────────────────────────────────────────────────
+
+function SortableAssetCard({
+  asset,
+  isSelected,
+  language,
+  onSelect,
+  onDelete,
+  isDeleting,
+}: {
+  asset: {
+    id: string;
+    originalFileName: string;
+    previewUrl: string;
+    width: number;
+    height: number;
+    status: string;
+    imageVersions: Array<{ id: string; versionType: string; fileUrl: string; createdAt: string }>;
+  };
+  isSelected: boolean;
+  language: string;
+  onSelect: () => void;
+  onDelete: () => void;
+  isDeleting: boolean;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: asset.id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} className="relative">
+      <button
+        type="button"
+        onClick={onSelect}
+        className={`w-full overflow-hidden rounded-[20px] border text-left transition ${
+          isSelected
+            ? "surface-accent border-[color:var(--border-accent)]"
+            : "surface-subtle hover:border-[color:var(--border-default)]"
+        }`}
+      >
+        <div className="relative h-28 w-full bg-black/30">
+          <Image src={asset.previewUrl} alt={asset.originalFileName} fill unoptimized sizes="240px" className="object-cover" />
+          {/* Drag handle overlay */}
+          <div
+            {...attributes}
+            {...listeners}
+            className="absolute left-2 top-2 flex size-6 cursor-grab items-center justify-center rounded-[8px] border border-white/10 bg-black/60 text-zinc-400 backdrop-blur-sm hover:text-zinc-200 active:cursor-grabbing"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <GripVertical className="size-3" />
+          </div>
+        </div>
+        <div className="px-3 py-2.5">
+          <div className="truncate text-sm font-medium text-white leading-tight">{asset.originalFileName}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{asset.width} × {asset.height}</div>
+          <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+            <Badge variant="outline" className="text-[0.6rem] px-1.5 py-0">
+              {asset.imageVersions.length} {language === "hu" ? "verzió" : "versions"}
+            </Badge>
+            <Badge variant="outline" className={`text-[0.6rem] px-1.5 py-0 flex items-center gap-1 ${asset.status === "ready" ? "border-emerald-500/30 text-emerald-400" : "border-zinc-600 text-zinc-500"}`}>
+              <div className={`size-1 rounded-full ${asset.status === "ready" ? "bg-emerald-400" : "bg-zinc-500"}`} />
+              {asset.status}
+            </Badge>
+          </div>
+        </div>
+      </button>
+      {/* Delete button */}
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onDelete(); }}
+        disabled={isDeleting}
+        title={language === "hu" ? "Törlés" : "Delete"}
+        className="absolute right-2 top-2 flex size-6 items-center justify-center rounded-[8px] border border-red-500/20 bg-black/60 text-red-400/70 backdrop-blur-sm transition hover:border-red-500/50 hover:bg-red-500/10 hover:text-red-300 disabled:opacity-40"
+      >
+        <Trash2 className="size-3" />
+      </button>
+    </div>
+  );
+}
+
+// ─── Main component ────────────────────────────────────────────────────────────────────────────────────
 
 export function WorkspaceView({ projectId }: { projectId: string }) {
   const language = useAppPreferencesStore((state) => state.language);
@@ -346,6 +448,17 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
     fallbackProvider?: string | null;
   } | null>(null);
   const [fullscreenOpen, setFullscreenOpen] = useState(false);
+  // Local asset ordering (drag-to-reorder, client-side only)
+  const [assetOrder, setAssetOrder] = useState<string[]>([]);
+
+  // ESC key to close fullscreen
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && fullscreenOpen) setFullscreenOpen(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [fullscreenOpen]);
 
   const {
     selectedAssetId,
@@ -372,6 +485,47 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
 
   const project = data?.project;
   const presets = useMemo(() => data?.presets ?? [], [data?.presets]);
+
+  // Sync asset order when project data loads
+  useEffect(() => {
+    if (!project) return;
+    const ids = project.imageAssets.map((a) => a.id);
+    setAssetOrder((prev) => {
+      if (prev.length === 0) return ids;
+      // Merge: keep existing order, append new ones
+      const existing = prev.filter((id) => ids.includes(id));
+      const newOnes = ids.filter((id) => !prev.includes(id));
+      return [...existing, ...newOnes];
+    });
+  }, [project]);
+
+  // Sorted assets based on local assetOrder
+  const sortedAssets = useMemo(() => {
+    if (!project) return [];
+    if (assetOrder.length === 0) return project.imageAssets;
+    return [...project.imageAssets].sort((a, b) => {
+      const ai = assetOrder.indexOf(a.id);
+      const bi = assetOrder.indexOf(b.id);
+      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+    });
+  }, [project, assetOrder]);
+
+  // dnd-kit sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setAssetOrder((prev) => {
+        const oldIndex = prev.indexOf(active.id as string);
+        const newIndex = prev.indexOf(over.id as string);
+        return arrayMove(prev, oldIndex, newIndex);
+      });
+    }
+  }, []);
   const activeProvider = providerData?.providers.find((p) => p.name === providerData.activeProvider);
   const effectiveProvider = activeProvider?.configured
     ? activeProvider
@@ -478,6 +632,20 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
     onError: (err) => toast.error(err instanceof Error ? err.message : t("workspace.exportFailed", language)),
   });
 
+  // Delete asset mutation
+  const deleteAssetMutation = useMutation({
+    mutationFn: (assetId: string) =>
+      fetchJson(`/api/projects/${projectId}/assets/${assetId}`, { method: "DELETE" }),
+    onSuccess: (_, assetId) => {
+      toast.success(language === "hu" ? "Fájl törölve" : "File deleted");
+      // If deleted asset was selected, clear selection
+      if (selectedAssetId === assetId) setSelectedAsset(undefined, undefined);
+      setAssetOrder((prev) => prev.filter((id) => id !== assetId));
+      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Delete failed"),
+  });
+
   const latestLog = selectedAsset?.generationLogs[0];
   const referenceUrl = selectedAsset?.storedFileUrl;
   const displayUrl = selectedVersion?.fileUrl ?? referenceUrl;
@@ -515,9 +683,10 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
         mode="slider"
         beforeLabel={language === "hu" ? "Eredeti render" : "Original render"}
         afterLabel={language === "hu" ? "AI-javított eredmény" : "AI-enhanced result"}
+        afterFilterStyle={filterStyle}
       />
     );
-  }, [referenceUrl, hasGeneratedVersion, compareVersion, displayUrl, originalVersion, language]);
+  }, [referenceUrl, hasGeneratedVersion, compareVersion, displayUrl, originalVersion, language, filterStyle]);
 
   return (
     <>
@@ -539,11 +708,19 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
               <div className="flex items-center gap-3">
                 {/* Mini controls in fullscreen */}
                 {!customPromptEnabled && (
-                  <div className="flex items-center gap-3" style={{ pointerEvents: "auto", position: "relative", zIndex: 60 }}>
+                  <div
+                    className="flex items-center gap-3"
+                    style={{ pointerEvents: "auto", position: "relative", zIndex: 60 }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  >
                     {sliderControls.slice(0, 3).map((ctrl) => (
                       <div key={ctrl.key} className="flex items-center gap-2">
-                        <span className="text-xs text-zinc-500">{t(ctrl.labelKey, language)}</span>
-                        <div style={{ pointerEvents: "auto", position: "relative", zIndex: 60 }}>
+                        <span className="text-xs text-zinc-500 whitespace-nowrap">{t(ctrl.labelKey, language)}</span>
+                        <div
+                          style={{ pointerEvents: "auto", position: "relative", zIndex: 60 }}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onMouseDown={(e) => e.stopPropagation()}
+                        >
                           <Slider
                             value={[Number(editor[ctrl.key as keyof typeof editor])]}
                             min={ctrl.min}
@@ -584,25 +761,55 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
               </div>
             </div>
             {/* Content */}
-            <div className="min-h-0 flex-1 p-4 flex flex-col">
-              {compareEnabled && hasGeneratedVersion ? (
-                <ComparisonView
-                  before={originalVersion?.fileUrl ?? referenceUrl ?? ""}
-                  after={compareVersion?.fileUrl ?? displayUrl ?? ""}
-                  mode="slider"
-                  beforeLabel={language === "hu" ? "Eredeti render" : "Original render"}
-                  afterLabel={language === "hu" ? "AI-javított eredmény" : "AI-enhanced result"}
-                  className="h-full"
-                />
-              ) : (
-                <ZoomableImagePanel
-                  src={displayUrl}
-                  alt={language === "hu" ? "Előnézet" : "Preview"}
-                  label={language === "hu" ? "Előnézet" : "Preview"}
-                  emptyText={language === "hu" ? "Tölts fel egy képet" : "Upload an image"}
-                  filterStyle={filterStyle}
-                  className="h-full"
-                />
+            <div className="min-h-0 flex-1 p-4 flex gap-4">
+              {/* Main image area */}
+              <div className="min-h-0 flex-1 flex flex-col">
+                {compareEnabled && hasGeneratedVersion ? (
+                  <ComparisonView
+                    before={originalVersion?.fileUrl ?? referenceUrl ?? ""}
+                    after={compareVersion?.fileUrl ?? displayUrl ?? ""}
+                    mode="slider"
+                    beforeLabel={language === "hu" ? "Eredeti render" : "Original render"}
+                    afterLabel={language === "hu" ? "AI-javított eredmény" : "AI-enhanced result"}
+                    afterFilterStyle={filterStyle}
+                    className="h-full"
+                  />
+                ) : (
+                  <ZoomableImagePanel
+                    src={displayUrl}
+                    alt={language === "hu" ? "Előnézet" : "Preview"}
+                    label={language === "hu" ? "Előnézet" : "Preview"}
+                    emptyText={language === "hu" ? "Tölts fel egy képet" : "Upload an image"}
+                    filterStyle={filterStyle}
+                    className="h-full"
+                  />
+                )}
+              </div>
+              {/* Version picker sidebar — only when compare is OFF */}
+              {!compareEnabled && hasGeneratedVersion && (
+                <div className="flex w-48 shrink-0 flex-col gap-2">
+                  <div className="text-[0.6rem] uppercase tracking-[0.2em] text-zinc-600">
+                    {language === "hu" ? "Verziók" : "Versions"}
+                  </div>
+                  {selectedAsset?.imageVersions.map((version) => {
+                    const isActive = version.id === selectedVersion?.id;
+                    return (
+                      <button
+                        key={version.id}
+                        type="button"
+                        onClick={() => setSelectedAsset(selectedAsset.id, version.id)}
+                        className={`flex items-center gap-2 rounded-[14px] border px-3 py-2 text-left text-xs transition ${
+                          isActive
+                            ? "border-blue-500/40 bg-blue-500/10 text-blue-200"
+                            : "border-white/8 bg-white/3 text-zinc-400 hover:bg-white/5"
+                        }`}
+                      >
+                        <ImageIcon className={`size-3 shrink-0 ${isActive ? "text-blue-400" : "text-zinc-600"}`} />
+                        {formatVersionLabel(version.versionType, language)}
+                      </button>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </motion.div>
@@ -629,9 +836,9 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
             <CardDescription className="text-xs">
               {project?.clientName || t("common.localFirstWorkspace", language)}
             </CardDescription>
-            {/* Two-button upload: file picker + folder picker */}
+            {/* Stacked upload buttons */}
             <div className="mt-2">
-              <UploadDropzone projectId={projectId} compact />
+              <UploadDropzone projectId={projectId} />
             </div>
           </CardHeader>
           <div className="min-h-0 flex-1 overflow-hidden px-4 pb-4">
@@ -644,35 +851,29 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                     ))}
                   </div>
                 )}
-                {project?.imageAssets.map((asset) => (
-                  <button
-                    key={asset.id}
-                    type="button"
-                    onClick={() => setSelectedAsset(asset.id, asset.imageVersions[0]?.id)}
-                    className={`w-full overflow-hidden rounded-[20px] border text-left transition ${
-                      asset.id === selectedAsset?.id
-                        ? "surface-accent border-[color:var(--border-accent)]"
-                        : "surface-subtle hover:border-[color:var(--border-default)]"
-                    }`}
-                  >
-                    <div className="relative h-28 w-full bg-black/30">
-                      <Image src={asset.previewUrl} alt={asset.originalFileName} fill unoptimized sizes="240px" className="object-cover" />
-                    </div>
-                    <div className="px-3 py-2.5">
-                      <div className="truncate text-sm font-medium text-white leading-tight">{asset.originalFileName}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">{asset.width} × {asset.height}</div>
-                      <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-                        <Badge variant="outline" className="text-[0.6rem] px-1.5 py-0">
-                          {asset.imageVersions.length} {t("common.versions", language)}
-                        </Badge>
-                        <Badge variant="outline" className={`text-[0.6rem] px-1.5 py-0 flex items-center gap-1 ${asset.status === "ready" ? "border-emerald-500/30 text-emerald-400" : "border-zinc-600 text-zinc-500"}`}>
-                          <div className={`size-1 rounded-full ${asset.status === "ready" ? "bg-emerald-400" : "bg-zinc-500"}`} />
-                          {asset.status}
-                        </Badge>
-                      </div>
-                    </div>
-                  </button>
-                ))}
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={handleDragEnd}
+                >
+                  <SortableContext items={sortedAssets.map((a) => a.id)} strategy={verticalListSortingStrategy}>
+                    {sortedAssets.map((asset) => (
+                      <SortableAssetCard
+                        key={asset.id}
+                        asset={asset}
+                        isSelected={asset.id === selectedAsset?.id}
+                        language={language}
+                        onSelect={() => setSelectedAsset(asset.id, asset.imageVersions[0]?.id)}
+                        onDelete={() => {
+                          if (confirm(language === "hu" ? `Töröljük a(z) "${asset.originalFileName}" fájlt?` : `Delete "${asset.originalFileName}"?`)) {
+                            deleteAssetMutation.mutate(asset.id);
+                          }
+                        }}
+                        isDeleting={deleteAssetMutation.isPending && deleteAssetMutation.variables === asset.id}
+                      />
+                    ))}
+                  </SortableContext>
+                </DndContext>
               </div>
             </ScrollArea>
           </div>
@@ -806,15 +1007,27 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                 />
               )}
             </div>
-            {/* ── ORIGINAL REFERENCE (bottom) ──────────────────────────────────── */}
+            {/* ── PREVIEW IMAGE (bottom) ─────────────────────────────────────────────────── */}
             <ZoomableImagePanel
-              src={referenceUrl}
-              alt={t("workspace.originalReference", language)}
-              label={t("workspace.originalReference", language)}
+              src={displayUrl}
+              alt={language === "hu" ? "Előnézeti kép" : "Preview image"}
+              label={language === "hu" ? "Előnézeti kép" : "Preview image"}
+              badge={
+                selectedVersion ? (
+                  <Badge variant="outline" className={`text-[0.6rem] px-1.5 py-0 ${
+                    selectedVersion.versionType !== "original"
+                      ? "border-violet-500/30 bg-violet-500/10 text-violet-300"
+                      : "border-white/10 text-zinc-500"
+                  }`}>
+                    {formatVersionLabel(selectedVersion.versionType, language)}
+                  </Badge>
+                ) : undefined
+              }
               emptyText={t("workspace.projectFiles", language)}
+              filterStyle={filterStyle}
               onFullscreen={() => setFullscreenOpen(true)}
               className="shrink-0"
-            />           {/* Queue status bar */}
+            />         {/* Queue status bar */}
             <div className="rounded-[20px] border border-white/8 bg-[#0a0d14] px-4 py-3 shrink-0">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-xs text-zinc-500">

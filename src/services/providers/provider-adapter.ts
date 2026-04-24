@@ -4,6 +4,9 @@ export type ProviderGenerateInput = {
   projectId: string;
   sourcePath: string;
   prompt: BuildPromptInput;
+  /** Original image dimensions for aspect-ratio-preserving output size selection */
+  sourceWidth?: number;
+  sourceHeight?: number;
 };
 
 export type ProviderGenerateResult = {
