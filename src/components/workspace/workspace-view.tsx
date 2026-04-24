@@ -6,13 +6,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronLeft,
   ChevronRight,
+  Copy,
   Download,
   GripVertical,
   Image as ImageIcon,
+  Link2,
+  Link2Off,
   Maximize2,
   Minimize2,
   PanelRightClose,
   ScanSearch,
+  Share2,
   Sparkles,
   SplitSquareVertical,
   Trash2,
@@ -70,6 +74,7 @@ import {
 } from "@/services/export/export-destinations";
 import { useAppPreferencesStore } from "@/store/app-preferences";
 import { useWorkspaceStore } from "@/store/workspace-store";
+import { OnboardingTour } from "@/components/onboarding/onboarding-tour";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -79,6 +84,7 @@ type ProjectDataResponse = {
     name: string;
     description?: string | null;
     clientName?: string | null;
+    shareToken?: string | null;
     imageAssets: Array<{
       id: string;
       originalFileName: string;
@@ -438,6 +444,9 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient();
   const [, startTransition] = useTransition();
   const [exportDestination, setExportDestination] = useState<ExportDestinationId>("local");
+  const [exportFormat, setExportFormat] = useState<"png" | "jpg" | "webp">("png");
+  const [exportQuality, setExportQuality] = useState(92);
+  const [exportScale, setExportScale] = useState<1 | 2 | 4>(1);
   const [controlsCollapsed, setControlsCollapsed] = useState(false);
   const [customPromptEnabled, setCustomPromptEnabled] = useState(false);
   const [customPromptText, setCustomPromptText] = useState("");
@@ -450,6 +459,9 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
   const [fullscreenOpen, setFullscreenOpen] = useState(false);
   // Local asset ordering (drag-to-reorder, client-side only)
   const [assetOrder, setAssetOrder] = useState<string[]>([]);
+  // Batch generation state
+  const [batchGenerating, setBatchGenerating] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
 
   // ESC key to close fullscreen
   useEffect(() => {
@@ -619,13 +631,22 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
       const response = await fetch("/api/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageVersionId: selectedVersion.id, format: "png", quality: 95, filenameSuffix: "final", retainMetadata: true }),
+        body: JSON.stringify({
+          imageVersionId: selectedVersion.id,
+          format: exportFormat,
+          quality: exportQuality,
+          width: exportScale > 1 ? (selectedAsset?.width ?? undefined) ? (selectedAsset as { width?: number }).width! * exportScale : undefined : undefined,
+          height: exportScale > 1 ? (selectedAsset?.height ?? undefined) ? (selectedAsset as { height?: number }).height! * exportScale : undefined : undefined,
+          filenameSuffix: "final",
+          retainMetadata: true,
+        }),
       });
       if (!response.ok) { const b = await response.json().catch(() => ({})); throw new Error(b.error ?? t("workspace.exportFailed", language)); }
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = `${selectedAsset?.originalFileName ?? "render"}-final.png`; a.click();
+      const ext = exportFormat === "jpg" ? "jpg" : exportFormat === "webp" ? "webp" : "png";
+      a.href = url; a.download = `${selectedAsset?.originalFileName?.replace(/\.[^.]+$/, "") ?? "render"}-final.${ext}`; a.click();
       URL.revokeObjectURL(url);
     },
     onSuccess: () => toast.success(t("workspace.exportPrepared", language)),
@@ -645,6 +666,102 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
     },
     onError: (err) => toast.error(err instanceof Error ? err.message : "Delete failed"),
   });
+
+  // Restore a previous version (duplicate it as a new realism_pass version)
+  const restoreVersionMutation = useMutation({
+    mutationFn: ({ assetId, versionId }: { assetId: string; versionId: string }) =>
+      fetchJson<{ version: { id: string } }>(`/api/projects/${projectId}/assets/${assetId}/versions/${versionId}/restore`, { method: "POST" }),
+    onSuccess: (data, { assetId }) => {
+      toast.success(language === "hu" ? "Verzió visszaallítva" : "Version restored");
+      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+      // Select the newly created version
+      setSelectedAsset(assetId, data.version.id);
+      setCompareEnabled(false);
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Restore failed"),
+  });
+
+  // Share project mutations
+  const shareToken = project?.shareToken;
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+
+  const generateShareMutation = useMutation({
+    mutationFn: () => fetchJson<{ shareToken: string }>(`/api/projects/${projectId}/share`, { method: "POST" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+      toast.success(language === "hu" ? "Megosztási link létrehozva" : "Share link created");
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Share failed"),
+  });
+
+  const revokeShareMutation = useMutation({
+    mutationFn: () => fetchJson(`/api/projects/${projectId}/share`, { method: "DELETE" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+      toast.success(language === "hu" ? "Megosztási link visszavonva" : "Share link revoked");
+    },
+    onError: (err) => toast.error(err instanceof Error ? err.message : "Revoke failed"),
+  });
+
+  const handleBatchGenerate = useCallback(async () => {
+    if (!sortedAssets.length || !activePresetId || batchGenerating) return;
+    setBatchGenerating(true);
+    setBatchProgress({ done: 0, total: sortedAssets.length });
+    setGenerationFallback(null);
+    const providerName = effectiveProvider?.name;
+    for (let i = 0; i < sortedAssets.length; i++) {
+      const asset = sortedAssets[i];
+      upsertQueueEntry({
+        id: asset.id,
+        label: asset.originalFileName,
+        progress: 10,
+        status: "queued",
+        message: language === "hu" ? `Várakozás… (${i + 1}/${sortedAssets.length})` : `Queued… (${i + 1}/${sortedAssets.length})`,
+      });
+    }
+    for (let i = 0; i < sortedAssets.length; i++) {
+      const asset = sortedAssets[i];
+      upsertQueueEntry({
+        id: asset.id,
+        label: asset.originalFileName,
+        progress: 35,
+        status: "processing",
+        message: `${providerName ?? "AI"} — ${language === "hu" ? "generálás folyamatban" : "generating"} (${i + 1}/${sortedAssets.length})`,
+      });
+      try {
+        await fetchJson("/api/generations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageAssetId: asset.id,
+            presetId: customPromptEnabled ? undefined : activePresetId,
+            customPrompt: customPromptEnabled ? customPromptText : undefined,
+          }),
+        });
+        upsertQueueEntry({
+          id: asset.id,
+          label: asset.originalFileName,
+          progress: 100,
+          status: "completed",
+          message: language === "hu" ? "Mentve" : "Saved",
+        });
+        setBatchProgress({ done: i + 1, total: sortedAssets.length });
+        await queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+      } catch (err) {
+        upsertQueueEntry({
+          id: asset.id,
+          label: asset.originalFileName,
+          progress: 100,
+          status: "failed",
+          message: err instanceof Error ? err.message : (language === "hu" ? "Hiba" : "Failed"),
+        });
+        setBatchProgress({ done: i + 1, total: sortedAssets.length });
+      }
+    }
+    setBatchGenerating(false);
+    toast.success(language === "hu" ? "Batch generálás kész" : "Batch generation complete");
+    setCompareEnabled(true);
+  }, [sortedAssets, activePresetId, batchGenerating, effectiveProvider, upsertQueueEntry, language, customPromptEnabled, customPromptText, queryClient, projectId, setCompareEnabled]);
 
   const latestLog = selectedAsset?.generationLogs[0];
   const referenceUrl = selectedAsset?.storedFileUrl;
@@ -961,6 +1078,80 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
               {compareEnabled ? t("workspace.hideCompare", language) : t("common.compare", language)}
             </Button>
 
+            {/* Share button */}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShareDialogOpen((o) => !o)}
+              className={shareToken ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" : ""}
+              title={language === "hu" ? "Projekt megosztása" : "Share project"}
+            >
+              <Share2 className="size-3.5 mr-1.5" />
+              {shareToken
+                ? (language === "hu" ? "Megosztva" : "Shared")
+                : (language === "hu" ? "Megosztás" : "Share")}
+            </Button>
+
+            {/* Share dialog */}
+            {shareDialogOpen && (
+              <div className="absolute top-14 left-1/2 z-50 -translate-x-1/2 w-[420px] rounded-[20px] border border-white/10 bg-[#0d1117] p-5 shadow-2xl">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-zinc-100">{language === "hu" ? "Projekt megosztása" : "Share project"}</h3>
+                  <button type="button" onClick={() => setShareDialogOpen(false)} className="text-zinc-500 hover:text-zinc-200">
+                    <X className="size-4" />
+                  </button>
+                </div>
+                {shareToken ? (
+                  <>
+                    <p className="text-xs text-zinc-500 mb-2">{language === "hu" ? "Nyilvános megosztási link:" : "Public share link:"}</p>
+                    <div className="flex items-center gap-2 rounded-[12px] border border-white/10 bg-white/4 px-3 py-2">
+                      <span className="flex-1 truncate font-mono text-xs text-zinc-300">
+                        {typeof window !== "undefined" ? `${window.location.origin}/share/${shareToken}` : `/share/${shareToken}`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const url = `${window.location.origin}/share/${shareToken}`;
+                          navigator.clipboard.writeText(url);
+                          toast.success(language === "hu" ? "Link másolva" : "Link copied");
+                        }}
+                        className="text-zinc-500 hover:text-zinc-200 transition"
+                      >
+                        <Copy className="size-3.5" />
+                      </button>
+                    </div>
+                    <div className="mt-3 flex gap-2">
+                      <Button size="sm" variant="outline" className="flex-1 border-white/10 text-zinc-400"
+                        onClick={() => revokeShareMutation.mutate()}
+                        disabled={revokeShareMutation.isPending}
+                      >
+                        <Link2Off className="size-3.5 mr-1.5" />
+                        {language === "hu" ? "Link visszavonása" : "Revoke link"}
+                      </Button>
+                      <Button size="sm" variant="outline" className="flex-1 border-white/10 text-zinc-400"
+                        onClick={() => generateShareMutation.mutate()}
+                        disabled={generateShareMutation.isPending}
+                      >
+                        <Link2 className="size-3.5 mr-1.5" />
+                        {language === "hu" ? "Új link" : "New link"}
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs text-zinc-500 mb-3">{language === "hu" ? "Hozz létre egy nyilvános linket, amelyen keresztül bárki megtekintheti a projekt eredményeit." : "Create a public link so anyone can view the project results."}</p>
+                    <Button size="sm" className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 text-white border-0"
+                      onClick={() => generateShareMutation.mutate()}
+                      disabled={generateShareMutation.isPending}
+                    >
+                      <Link2 className="size-3.5 mr-1.5" />
+                      {language === "hu" ? "Megosztási link létrehozása" : "Create share link"}
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
+
             {/* Provider pill */}
             <div className="ml-auto flex min-w-0 items-center gap-2 rounded-full border border-white/10 bg-white/4 px-3 py-1 text-xs text-zinc-400">
               <div className="size-1.5 rounded-full bg-blue-400" />
@@ -990,7 +1181,33 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                   </SelectGroup>
                 </SelectContent>
               </Select>
-              <Button size="sm" variant="outline" onClick={() => exportMutation.mutate()} disabled={!selectedVersion || exportMutation.isPending} className="h-8">
+              {/* Format selector */}
+              <Select value={exportFormat} onValueChange={(v) => setExportFormat(v as "png" | "jpg" | "webp")}>
+                <SelectTrigger size="sm" className="h-8 w-20 text-xs uppercase">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  <SelectGroup>
+                    <SelectItem value="png">PNG</SelectItem>
+                    <SelectItem value="jpg">JPG</SelectItem>
+                    <SelectItem value="webp">WebP</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              {/* Scale selector */}
+              <Select value={String(exportScale)} onValueChange={(v) => setExportScale(Number(v) as 1 | 2 | 4)}>
+                <SelectTrigger size="sm" className="h-8 w-16 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent align="end">
+                  <SelectGroup>
+                    <SelectItem value="1">1x</SelectItem>
+                    <SelectItem value="2">2x</SelectItem>
+                    <SelectItem value="4">4x</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <Button size="sm" variant="outline" onClick={() => exportMutation.mutate()} disabled={!selectedVersion || exportMutation.isPending} className="h-8" title={language === "hu" ? "Export" : "Export"}>
                 <Download className="size-3.5" />
               </Button>
             </div>
@@ -1169,14 +1386,29 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                               </div>
                             </div>
                           </div>
-                          <Badge
-                            variant={isGenerated ? "secondary" : "outline"}
-                            className={isGenerated
-                              ? "border-violet-500/30 bg-violet-500/10 text-violet-300 text-[0.6rem]"
-                              : "border-white/10 text-zinc-500 text-[0.6rem]"}
-                          >
-                            {isGenerated ? t("common.generated", language) : t("common.saved", language)}
-                          </Badge>
+                          <div className="flex items-center gap-1.5">
+                            {isGenerated && !isActive && (
+                              <button
+                                type="button"
+                                title={language === "hu" ? "Visszaallítás" : "Restore"}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  restoreVersionMutation.mutate({ assetId: selectedAsset.id, versionId: version.id });
+                                }}
+                                className="flex size-6 items-center justify-center rounded-[8px] border border-white/10 bg-white/4 text-zinc-500 transition hover:bg-emerald-500/15 hover:border-emerald-500/30 hover:text-emerald-400"
+                              >
+                                <ChevronLeft className="size-3" />
+                              </button>
+                            )}
+                            <Badge
+                              variant={isGenerated ? "secondary" : "outline"}
+                              className={isGenerated
+                                ? "border-violet-500/30 bg-violet-500/10 text-violet-300 text-[0.6rem]"
+                                : "border-white/10 text-zinc-500 text-[0.6rem]"}
+                            >
+                              {isGenerated ? t("common.generated", language) : t("common.saved", language)}
+                            </Badge>
+                          </div>
                         </button>
                       );
                     })}
@@ -1189,7 +1421,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                     <Button
                       size="default"
                       onClick={() => generateMutation.mutate(undefined)}
-                      disabled={!selectedAsset || !activePresetId || isGenerating || customPromptEnabled}
+                      disabled={!selectedAsset || !activePresetId || isGenerating || batchGenerating || customPromptEnabled}
                       className="w-full bg-gradient-to-r from-blue-600 to-violet-600 hover:from-blue-500 hover:to-violet-500 text-white font-semibold shadow-lg shadow-blue-500/20 border-0 h-11"
                     >
                       <Sparkles className="size-4 mr-2" />
@@ -1197,6 +1429,25 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                         ? (language === "hu" ? "Generálás…" : "Generating…")
                         : (language === "hu" ? "Automatikus javítás" : "Auto enhance")}
                     </Button>
+                    {/* Batch generate — only shown when multiple assets exist */}
+                    {sortedAssets.length > 1 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleBatchGenerate}
+                        disabled={!activePresetId || isGenerating || batchGenerating || customPromptEnabled}
+                        className="w-full border-white/10 text-zinc-300 hover:bg-white/5"
+                      >
+                        <Sparkles className="size-3.5 mr-1.5" />
+                        {batchGenerating
+                          ? (language === "hu"
+                              ? `Batch: ${batchProgress.done}/${batchProgress.total}…`
+                              : `Batch: ${batchProgress.done}/${batchProgress.total}…`)
+                          : (language === "hu"
+                              ? `Összes generálása (${sortedAssets.length} kép)`
+                              : `Generate all (${sortedAssets.length} images)`)}
+                      </Button>
+                    )}
                     <p className="text-[0.65rem] text-zinc-600 text-center">
                       {language === "hu"
                         ? "Az aktív preset és beállítások alapján"
@@ -1305,6 +1556,80 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                     )}
                   </div>
 
+                  <Separator />
+
+                  {/* ── GENERATION HISTORY ───────────────────────────────── */}
+                  {selectedAsset && selectedAsset.generationLogs.length > 0 && (
+                    <div className="flex flex-col gap-2">
+                      <div className="text-[0.65rem] uppercase tracking-[0.24em] text-zinc-600">
+                        {language === "hu" ? "Generálási előzmények" : "Generation history"}
+                      </div>
+                      <div className="flex flex-col gap-1.5">
+                        {selectedAsset.generationLogs.map((log) => (
+                          <div
+                            key={log.id}
+                            className="flex items-center gap-2 rounded-[12px] border border-white/8 bg-white/3 px-3 py-2"
+                          >
+                            <div className={`size-1.5 rounded-full shrink-0 ${
+                              log.success ? "bg-emerald-400" : "bg-red-400"
+                            }`} />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-xs text-zinc-300 truncate">{log.providerName}</span>
+                                <span className="text-[0.6rem] text-zinc-600 shrink-0">
+                                  {log.processingTime > 0 ? `${(log.processingTime / 1000).toFixed(1)}s` : ""}
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between gap-1 mt-0.5">
+                                <span className="text-[0.6rem] text-zinc-600 truncate">
+                                  {new Date(log.createdAt).toLocaleString(language === "hu" ? "hu-HU" : "en-US", {
+                                    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
+                                  })}
+                                </span>
+                                {!log.success && log.errorMessage && (
+                                  <span className="text-[0.6rem] text-red-400 truncate max-w-[100px]" title={log.errorMessage}>
+                                    {log.errorMessage.slice(0, 24)}…
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── IMAGE METADATA ───────────────────────────────────── */}
+                  {selectedAsset && (
+                    <div className="flex flex-col gap-2">
+                      <div className="text-[0.65rem] uppercase tracking-[0.24em] text-zinc-600">
+                        {language === "hu" ? "Kép adatok" : "Image metadata"}
+                      </div>
+                      <div className="rounded-[12px] border border-white/8 bg-white/3 px-3 py-2 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[0.65rem] text-zinc-600">{language === "hu" ? "Fájlnév" : "Filename"}</span>
+                          <span className="text-[0.65rem] text-zinc-400 truncate max-w-[140px]" title={selectedAsset.originalFileName}>
+                            {selectedAsset.originalFileName}
+                          </span>
+                        </div>
+                        {selectedAsset.width && selectedAsset.height && (
+                          <div className="flex items-center justify-between">
+                            <span className="text-[0.65rem] text-zinc-600">{language === "hu" ? "Felbontás" : "Resolution"}</span>
+                            <span className="text-[0.65rem] text-zinc-400">{selectedAsset.width} × {selectedAsset.height}</span>
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between">
+                          <span className="text-[0.65rem] text-zinc-600">{language === "hu" ? "Verziók" : "Versions"}</span>
+                          <span className="text-[0.65rem] text-zinc-400">{selectedAsset.imageVersions.length}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[0.65rem] text-zinc-600">{language === "hu" ? "Generálások" : "Generations"}</span>
+                          <span className="text-[0.65rem] text-zinc-400">{selectedAsset.generationLogs.length}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                 </div>
               </ScrollArea>
             </CardContent>
@@ -1312,6 +1637,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
         ) : null}
       </div>
     </AppFrame>
+    <OnboardingTour language={language} />
     </>
   );
 }
