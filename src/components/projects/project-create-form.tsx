@@ -19,7 +19,7 @@ type ProjectFormValues = {
 };
 
 type Props = {
-  onCreated?: () => void;
+  onCreated?: (projectId: string) => void;
 };
 
 export function ProjectCreateForm({ onCreated }: Props) {
@@ -40,11 +40,13 @@ export function ProjectCreateForm({ onCreated }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(values),
       }),
-    onSuccess: () => {
+    onSuccess: (data: unknown) => {
       form.reset();
       queryClient.invalidateQueries({ queryKey: ["projects"] });
       toast.success(t("project.created", language));
-      onCreated?.();
+      const projectId = (data as { project?: { id?: string } })?.project?.id;
+      if (projectId) onCreated?.(projectId);
+      else onCreated?.("");
     },
     onError: (error) => {
       toast.error(error instanceof Error ? error.message : t("project.createError", language));

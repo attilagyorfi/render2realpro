@@ -7,12 +7,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
-  FolderOpen,
   Image as ImageIcon,
   Maximize2,
   Minimize2,
   PanelRightClose,
-  Plus,
   ScanSearch,
   Sparkles,
   SplitSquareVertical,
@@ -24,6 +22,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "sonner";
 
 import { AppFrame } from "@/components/layout/app-frame";
+import { UploadDropzone } from "@/components/upload/upload-dropzone";
 import { ComparisonView } from "@/components/comparison/comparison-view";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -275,92 +274,6 @@ function ZoomableImagePanel({
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-// ─── Compact upload button ────────────────────────────────────────────────────
-
-function CompactUploadButton({ projectId }: { projectId: string }) {
-  const language = useAppPreferencesStore((state) => state.language);
-  const queryClient = useQueryClient();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const folderInputRef = useRef<HTMLInputElement>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  const uploadMutation = useMutation({
-    mutationFn: async (files: File[]) => {
-      const formData = new FormData();
-      files.forEach((file) => formData.append("files", file));
-      const res = await fetch(`/api/projects/${projectId}/assets`, { method: "POST", body: formData });
-      if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.error ?? t("upload.failed", language)); }
-      return res.json();
-    },
-    onSuccess: (_, files) => {
-      toast.success(files.length > 1 ? `${files.length} ${language === "hu" ? "fájl feltöltve" : "files uploaded"}` : t("upload.success", language));
-      queryClient.invalidateQueries({ queryKey: ["project", projectId] });
-    },
-    onError: (err) => toast.error(err instanceof Error ? err.message : t("upload.failed", language)),
-  });
-
-  const handleFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []).filter((f) => ["image/png","image/jpeg","image/webp"].includes(f.type));
-    if (files.length > 0) uploadMutation.mutate(files);
-    e.target.value = "";
-    setMenuOpen(false);
-  };
-
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setMenuOpen((o) => !o)}
-        title={language === "hu" ? "Fájl hozzáadása" : "Add file"}
-        className="flex size-8 items-center justify-center rounded-[12px] border border-white/15 bg-white/5 text-zinc-400 transition hover:border-white/30 hover:bg-white/8 hover:text-zinc-200"
-      >
-        <Plus className="size-4" />
-      </button>
-      <AnimatePresence>
-        {menuOpen && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.92, y: -4 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.92, y: -4 }}
-            transition={{ duration: 0.12 }}
-            className="absolute left-0 top-10 z-50 flex flex-col gap-1 rounded-[16px] border border-white/12 bg-[#0f1420] p-1.5 shadow-2xl min-w-[160px]"
-          >
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2.5 rounded-[10px] px-3 py-2 text-sm text-zinc-300 transition hover:bg-white/8"
-            >
-              <ImageIcon className="size-3.5 text-zinc-500" />
-              {language === "hu" ? "Fájl(ok) megnyitása" : "Open file(s)"}
-            </button>
-            <button
-              type="button"
-              onClick={() => folderInputRef.current?.click()}
-              className="flex items-center gap-2.5 rounded-[10px] px-3 py-2 text-sm text-zinc-300 transition hover:bg-white/8"
-            >
-              <FolderOpen className="size-3.5 text-zinc-500" />
-              {language === "hu" ? "Mappa megnyitása" : "Open folder"}
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      {/* Hidden inputs */}
-      <input ref={fileInputRef} type="file" className="hidden" multiple accept=".png,.jpg,.jpeg,.webp" onChange={handleFiles} />
-      <input
-        ref={folderInputRef}
-        type="file"
-        className="hidden"
-        multiple
-        // @ts-expect-error – non-standard but widely supported
-        webkitdirectory=""
-        directory=""
-        accept=".png,.jpg,.jpeg,.webp"
-        onChange={handleFiles}
-      />
     </div>
   );
 }
@@ -712,11 +625,14 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
           <CardHeader className="shrink-0 pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm">{t("workspace.projectFiles", language)}</CardTitle>
-              <CompactUploadButton projectId={projectId} />
             </div>
             <CardDescription className="text-xs">
               {project?.clientName || t("common.localFirstWorkspace", language)}
             </CardDescription>
+            {/* Two-button upload: file picker + folder picker */}
+            <div className="mt-2">
+              <UploadDropzone projectId={projectId} compact />
+            </div>
           </CardHeader>
           <div className="min-h-0 flex-1 overflow-hidden px-4 pb-4">
             <ScrollArea className="h-full">
@@ -777,11 +693,22 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
 
             <div className="h-4 w-px bg-white/10" />
 
-            {/* Compare toggle */}
+            {/* Compare toggle — opens fullscreen comparison */}
             <Button
               variant="outline"
               size="sm"
-              onClick={() => startTransition(() => setCompareEnabled(!compareEnabled))}
+              onClick={() => {
+                if (compareEnabled) {
+                  // If already enabled, toggle off
+                  startTransition(() => setCompareEnabled(false));
+                } else {
+                  // Enable compare and open fullscreen
+                  startTransition(() => {
+                    setCompareEnabled(true);
+                    setFullscreenOpen(true);
+                  });
+                }
+              }}
               disabled={!hasGeneratedVersion}
               className={compareEnabled ? "border-blue-500/40 bg-blue-500/10 text-blue-300" : ""}
             >
@@ -962,8 +889,9 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                           key={version.id}
                           type="button"
                           onClick={() => {
-                            // Functional: update both asset and version in store
+                            // Select the version and disable compare so the selected image is shown
                             setSelectedAsset(selectedAsset.id, version.id);
+                            setCompareEnabled(false);
                           }}
                           className={`flex items-center justify-between rounded-[18px] border px-3 py-2.5 text-left transition ${
                             isActive
@@ -1032,7 +960,12 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                       disabled={customPromptEnabled}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder={t("workspace.selectPreset", language)} />
+                        {/* Show human-readable preset name instead of raw ID */}
+                        <span className="truncate text-sm">
+                          {activePresetId
+                            ? t(`preset.${presets.find((p) => p.id === activePresetId)?.name ?? ""}` as Parameters<typeof t>[0], language) || presets.find((p) => p.id === activePresetId)?.name
+                            : t("workspace.selectPreset", language)}
+                        </span>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectGroup>

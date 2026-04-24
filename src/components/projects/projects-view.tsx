@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
@@ -49,6 +50,7 @@ const stagger = {
 
 export function ProjectsView() {
   const language = useAppPreferencesStore((state) => state.language);
+  const router = useRouter();
   const [createOpen, setCreateOpen] = useState(false);
 
   const { data, isLoading } = useQuery({
@@ -131,7 +133,12 @@ export function ProjectsView() {
                     transition={{ duration: 0.25 }}
                     className="flex items-start"
                   >
-                    <ProjectCreateForm onCreated={() => setCreateOpen(false)} />
+                    <ProjectCreateForm
+                      onCreated={(projectId) => {
+                        setCreateOpen(false);
+                        if (projectId) router.push(`/app/projects/${projectId}`);
+                      }}
+                    />
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -234,15 +241,21 @@ export function ProjectsView() {
 
                         {versionCount > 0 && (
                           <div className="flex flex-wrap gap-1.5 lg:max-w-[200px]">
-                            {allVersions.slice(0, 4).map((v) => (
-                              <div
-                                key={v.id}
-                                className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[0.65rem] text-zinc-400"
-                              >
-                                <FileImage className="size-2.5" />
-                                {v.versionType ?? "v"}
-                              </div>
-                            ))}
+                            {allVersions.slice(0, 4).map((v) => {
+                              const vLabel = v.versionType === "realism_pass" ? (language === "hu" ? "Realizmus-passz" : "Realism pass")
+                                : v.versionType === "texture_pass" ? (language === "hu" ? "Textúra-passz" : "Texture pass")
+                                : v.versionType === "original" ? (language === "hu" ? "Eredeti" : "Original")
+                                : v.versionType ?? "v";
+                              return (
+                                <div
+                                  key={v.id}
+                                  className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[0.65rem] text-zinc-400"
+                                >
+                                  <FileImage className="size-2.5" />
+                                  {vLabel}
+                                </div>
+                              );
+                            })}
                             {versionCount > 4 && (
                               <div className="flex items-center rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[0.65rem] text-zinc-500">
                                 +{versionCount - 4}
