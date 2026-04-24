@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { Languages, Moon, Sun } from "lucide-react";
+import { Languages } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants, Button } from "@/components/ui/button";
@@ -101,8 +101,6 @@ const previewContent = {
 export function PreviewView() {
   const language = useAppPreferencesStore((state) => state.language);
   const setLanguage = useAppPreferencesStore((state) => state.setLanguage);
-  const theme = useAppPreferencesStore((state) => state.theme);
-  const toggleTheme = useAppPreferencesStore((state) => state.toggleTheme);
   const copy = previewContent[language];
 
   return (
@@ -131,11 +129,6 @@ export function PreviewView() {
                 </SelectGroup>
               </SelectContent>
             </Select>
-
-            <Button variant="outline" size="sm" type="button" onClick={toggleTheme}>
-              {theme === "dark" ? <Moon data-icon="inline-start" /> : <Sun data-icon="inline-start" />}
-              {theme === "dark" ? copy.themeDark : copy.themeLight}
-            </Button>
           </div>
         </div>
       </header>

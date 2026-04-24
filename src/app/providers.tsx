@@ -7,7 +7,6 @@ import { useEffect, useState } from "react";
 import { useAppPreferencesStore } from "@/store/app-preferences";
 
 export function AppProviders({ children }: { children: React.ReactNode }) {
-  const theme = useAppPreferencesStore((state) => state.theme);
   const language = useAppPreferencesStore((state) => state.language);
   const [queryClient] = useState(
     () =>
@@ -23,16 +22,16 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const root = document.documentElement;
-    root.classList.add("theme-transitioning");
-    root.classList.remove("dark", "light");
-    root.classList.add(theme);
+    // Theme is permanently locked to dark mode — no toggle available
+    root.classList.remove("light");
+    root.classList.add("dark");
     root.lang = language;
     const timeout = window.setTimeout(() => {
       root.classList.remove("theme-transitioning");
     }, 1400);
 
     return () => window.clearTimeout(timeout);
-  }, [language, theme]);
+  }, [language]);
 
   return (
     <QueryClientProvider client={queryClient}>
