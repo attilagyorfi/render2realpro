@@ -1,5 +1,5 @@
 export type GenerationFailureInfo = {
-  code: "OPENAI_BILLING_LIMIT" | "OPENAI_PROVIDER_ERROR" | "GENERATION_FAILED";
+  code: "FAL_PROVIDER_ERROR" | "FAL_TIMEOUT" | "GENERATION_FAILED";
   canFallbackToMock: boolean;
   retryable: boolean;
 };
@@ -7,17 +7,26 @@ export type GenerationFailureInfo = {
 export function classifyGenerationFailure(error: unknown): GenerationFailureInfo {
   const message = error instanceof Error ? error.message : String(error ?? "");
 
-  if (message.includes("billing_hard_limit_reached")) {
+  // Fal.ai timeout (AbortError from the 5-minute AbortController)
+  if (message.includes("timed out") || message.includes("AbortError") || message.includes("abort")) {
     return {
-      code: "OPENAI_BILLING_LIMIT",
+      code: "FAL_TIMEOUT",
       canFallbackToMock: true,
       retryable: true,
     };
   }
 
-  if (message.includes("OpenAI image edit failed")) {
+  // Fal.ai API errors (422, 5xx, etc.) — also catch legacy OpenAI strings
+  if (
+    message.includes("render2real-api") ||
+    message.includes("enhance-render") ||
+    message.includes("fal-ai") ||
+    message.includes("Fal.ai") ||
+    message.includes("OpenAI image edit failed") ||
+    message.includes("billing_hard_limit_reached")
+  ) {
     return {
-      code: "OPENAI_PROVIDER_ERROR",
+      code: "FAL_PROVIDER_ERROR",
       canFallbackToMock: true,
       retryable: true,
     };
