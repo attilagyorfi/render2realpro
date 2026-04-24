@@ -4,6 +4,9 @@ import { z } from "zod";
 import { createGenerationJob } from "@/services/image-processing/image-processing-service";
 import { classifyGenerationFailure } from "@/services/image-processing/generation-errors";
 
+// Allow up to 5 minutes for Fal.ai ControlNet generation
+export const maxDuration = 300;
+
 const generationSchema = z.object({
   imageAssetId: z.string(),
   presetId: z.string().optional(),

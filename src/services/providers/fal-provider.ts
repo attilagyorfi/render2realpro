@@ -12,17 +12,17 @@ import path from "path";
 import { readFile } from "fs/promises";
 import { writeGeneratedVersionBuffer } from "@/services/storage/storage-service";
 import type { ProviderAdapter, ProviderGenerateInput, ProviderGenerateResult } from "./provider-adapter";
-import { appEnv } from "@/config/env";
 
 const API_BASE_URL = process.env.RENDER2REAL_API_URL ?? "http://localhost:8000";
+
+// Fal.ai Flux ControlNet can take 60–300 seconds
+const FETCH_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 export class FalAiProvider implements ProviderAdapter {
   readonly name = "fal-controlnet";
   readonly label = "Fal.ai Flux ControlNet (Architectural Fidelity)";
 
   async generateRealismPass(input: ProviderGenerateInput): Promise<ProviderGenerateResult> {
-    const startedAt = Date.now();
-
     // ── Read source image ───────────────────────────────────────────────────
     const imageBytes = await readFile(input.sourcePath);
     const sourceExtension = path.extname(input.sourcePath).toLowerCase();
@@ -44,8 +44,6 @@ export class FalAiProvider implements ProviderAdapter {
     const userPrompt = promptParts.join(" ");
 
     // ── Map slider values to realism_level ──────────────────────────────────
-    // The realism_level (0..1) controls how aggressively the model changes the image.
-    // We derive it from the preset's brightness/contrast settings as a proxy.
     const realismLevel = 0.5; // default; can be extended to use slider values
 
     // ── Build multipart form data ────────────────────────────────────────────
@@ -60,11 +58,28 @@ export class FalAiProvider implements ProviderAdapter {
     formData.append("realism_level", String(realismLevel));
     formData.append("output_format", "png");
 
-    // ── Call FastAPI microservice ────────────────────────────────────────────
-    const response = await fetch(`${API_BASE_URL}/api/enhance-render`, {
-      method: "POST",
-      body: formData,
-    });
+    // ── Call FastAPI microservice (with 5-minute timeout) ────────────────────
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE_URL}/api/enhance-render`, {
+        method: "POST",
+        body: formData,
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") {
+        throw new Error(
+          `render2real-api timed out after ${FETCH_TIMEOUT_MS / 1000}s. ` +
+          `The Fal.ai model is still processing — please try again.`
+        );
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (!response.ok) {
       const errorText = await response.text();

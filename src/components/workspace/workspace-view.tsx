@@ -308,7 +308,34 @@ function ZoomableImagePanel({
 
 // ─── Loading overlay ──────────────────────────────────────────────────────────
 
-function GeneratingOverlay({ language }: { language: string }) {
+function GeneratingOverlay({ language, startedAt }: { language: string; startedAt: number }) {
+  // Heuristic progress: Fal.ai Flux ControlNet typically takes 60–180s
+  // We simulate progress based on elapsed time with a logarithmic curve
+  const ESTIMATED_TOTAL_MS = 120_000; // 2 minutes as baseline estimate
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setElapsed(Date.now() - startedAt);
+    }, 500);
+    return () => clearInterval(interval);
+  }, [startedAt]);
+
+  // Logarithmic progress: fast at start, slows down, caps at 95%
+  const rawProgress = Math.min(0.95, elapsed / ESTIMATED_TOTAL_MS);
+  const displayProgress = Math.round(Math.pow(rawProgress, 0.55) * 95);
+
+  const remainingMs = Math.max(0, ESTIMATED_TOTAL_MS - elapsed);
+  const remainingSec = Math.ceil(remainingMs / 1000);
+  const remainingText =
+    remainingSec > 60
+      ? language === "hu"
+        ? `~${Math.ceil(remainingSec / 60)} perc`
+        : `~${Math.ceil(remainingSec / 60)} min`
+      : language === "hu"
+        ? `~${remainingSec} mp`
+        : `~${remainingSec}s`;
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -334,24 +361,32 @@ function GeneratingOverlay({ language }: { language: string }) {
           <Sparkles className="size-5 text-blue-400" />
         </div>
       </div>
-      <div className="flex flex-col items-center gap-2">
-        <p className="text-sm font-medium text-zinc-200">
-          {language === "hu" ? "Generálás folyamatban…" : "Generation in progress…"}
-        </p>
-        <p className="text-xs text-zinc-500">
-          {language === "hu" ? "Ez 30–90 másodpercet vehet igénybe" : "This may take 30–90 seconds"}
-        </p>
-      </div>
-      {/* Animated dots */}
-      <div className="flex gap-1.5">
-        {[0, 1, 2].map((i) => (
+
+      {/* Progress percentage */}
+      <div className="flex flex-col items-center gap-3 w-48">
+        <div className="flex items-baseline gap-1">
+          <span className="text-3xl font-bold tabular-nums text-zinc-100">{displayProgress}</span>
+          <span className="text-lg font-medium text-zinc-400">%</span>
+        </div>
+        {/* Progress bar */}
+        <div className="w-full h-1.5 rounded-full bg-white/8 overflow-hidden">
           <motion.div
-            key={i}
-            animate={{ opacity: [0.3, 1, 0.3] }}
-            transition={{ duration: 1.2, repeat: Infinity, delay: i * 0.4 }}
-            className="size-1.5 rounded-full bg-blue-400"
+            className="h-full rounded-full bg-gradient-to-r from-blue-500 to-violet-500"
+            initial={{ width: "0%" }}
+            animate={{ width: `${displayProgress}%` }}
+            transition={{ duration: 0.5, ease: "easeOut" }}
           />
-        ))}
+        </div>
+        <div className="flex flex-col items-center gap-1">
+          <p className="text-sm font-medium text-zinc-200">
+            {language === "hu" ? "Generálás folyamatban…" : "Generation in progress…"}
+          </p>
+          <p className="text-xs text-zinc-500">
+            {displayProgress < 95
+              ? (language === "hu" ? `Becsült hátralévő idő: ${remainingText}` : `Estimated remaining: ${remainingText}`)
+              : (language === "hu" ? "Befejezés hamarosan…" : "Finishing up…")}
+          </p>
+        </div>
       </div>
     </motion.div>
   );
@@ -469,6 +504,8 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
   const [lastFidelityScore, setLastFidelityScore] = useState<FidelityScore | null>(null);
   // Inpainting canvas open state
   const [inpaintingOpen, setInpaintingOpen] = useState(false);
+  // Track when generation started for progress estimation
+  const [generationStartedAt, setGenerationStartedAt] = useState<number>(Date.now());
 
   // ESC key to close fullscreen
   useEffect(() => {
@@ -601,6 +638,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
       }),
     onMutate: () => {
       setGenerationFallback(null);
+      setGenerationStartedAt(Date.now());
       if (!selectedAsset) return;
       upsertQueueEntry({
         id: selectedAsset.id,
@@ -1273,7 +1311,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
             {/* ── MAIN CANVAS: comparison slider OR original reference ─────── */}
             <div className="relative min-h-0 flex-1">
               <AnimatePresence>
-                {isGenerating && <GeneratingOverlay language={language} />}
+                {isGenerating && <GeneratingOverlay language={language} startedAt={generationStartedAt} />}
               </AnimatePresence>
               {isLoading ? (
                 <div className="h-full rounded-[28px] bg-white/5 animate-pulse" />
