@@ -14,6 +14,7 @@ import {
   Link2Off,
   Maximize2,
   Minimize2,
+  Paintbrush,
   PanelRightClose,
   ScanSearch,
   Share2,
@@ -45,6 +46,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import { toast } from "sonner";
 
 import { AppFrame } from "@/components/layout/app-frame";
+import { FidelityBadge, type FidelityScore } from "@/components/workspace/fidelity-badge";
+import { InpaintingCanvas } from "@/components/workspace/inpainting-canvas";
 import { UploadDropzone } from "@/components/upload/upload-dropzone";
 import { ComparisonView } from "@/components/comparison/comparison-view";
 import { Badge } from "@/components/ui/badge";
@@ -462,6 +465,10 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
   // Batch generation state
   const [batchGenerating, setBatchGenerating] = useState(false);
   const [batchProgress, setBatchProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
+  // Fidelity score from last Fal.ai generation
+  const [lastFidelityScore, setLastFidelityScore] = useState<FidelityScore | null>(null);
+  // Inpainting canvas open state
+  const [inpaintingOpen, setInpaintingOpen] = useState(false);
 
   // ESC key to close fullscreen
   useEffect(() => {
@@ -603,7 +610,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
         message: `${effectiveProvider ? effectiveProvider.model ?? effectiveProvider.name : "AI"} — ${language === "hu" ? "generálás folyamatban" : "generating"}`,
       });
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       if (selectedAsset) {
         upsertQueueEntry({ id: selectedAsset.id, label: selectedAsset.originalFileName, progress: 100, status: "completed", message: t("workspace.generationSaved", language) });
       }
@@ -611,6 +618,9 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
       queryClient.invalidateQueries({ queryKey: ["project", projectId] });
       // Auto-enable comparison so user immediately sees before/after result
       setCompareEnabled(true);
+      // Extract fidelity score if Fal.ai provider was used
+      const fidelity = (data as { generation?: { fidelity?: FidelityScore } })?.generation?.fidelity;
+      if (fidelity) setLastFidelityScore(fidelity);
     },
     onError: (error) => {
       if (error instanceof ApiError) {
@@ -1240,6 +1250,26 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
               </div>
             ) : null}
 
+            {/* ── Fidelity badge + Inpainting button ─────────────────────── */}
+            {(lastFidelityScore || hasGeneratedVersion) && (
+              <div className="flex items-center gap-2 mb-2">
+                {lastFidelityScore && (
+                  <FidelityBadge fidelity={lastFidelityScore} />
+                )}
+                {hasGeneratedVersion && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs gap-1.5 border-violet-500/30 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20"
+                    onClick={() => setInpaintingOpen(true)}
+                  >
+                    <Paintbrush className="h-3 w-3" />
+                    {language === "hu" ? "Anyagszerkesztő" : "Material editor"}
+                  </Button>
+                )}
+              </div>
+            )}
+
             {/* ── MAIN CANVAS: comparison slider OR original reference ─────── */}
             <div className="relative min-h-0 flex-1">
               <AnimatePresence>
@@ -1638,6 +1668,27 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
       </div>
     </AppFrame>
     <OnboardingTour language={language} />
+
+    {/* ── Inpainting Canvas Overlay ────────────────────────────────── */}
+    {inpaintingOpen && selectedAsset && displayUrl && (
+      <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
+        <InpaintingCanvas
+          imageUrl={displayUrl}
+          imageWidth={selectedAsset.width ?? 1024}
+          imageHeight={selectedAsset.height ?? 768}
+          projectId={projectId}
+          assetId={selectedAsset.id}
+          onResult={(resultDataUri) => {
+            toast.success(language === "hu" ? "Anyagcsere alkalmazva!" : "Material applied!");
+            setInpaintingOpen(false);
+            // Refresh project data to pick up any saved version
+            queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+          }}
+          onClose={() => setInpaintingOpen(false)}
+          className="w-full max-w-5xl h-[80vh]"
+        />
+      </div>
+    )}
     </>
   );
 }

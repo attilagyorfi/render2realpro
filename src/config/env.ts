@@ -17,4 +17,8 @@ export const appEnv = {
   providerApiKey:
     process.env.RENDER2REAL_PROVIDER_API_KEY ?? process.env.OPENAI_API_KEY ?? "",
   openAiImageModel: process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1",
+  // render2real-api FastAPI microservice URL
+  render2realApiUrl: process.env.RENDER2REAL_API_URL ?? "http://localhost:8000",
+  // Fal.ai key (used by the Python microservice; exposed here for status checks)
+  falKey: process.env.FAL_KEY ?? "",
 } as const;

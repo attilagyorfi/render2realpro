@@ -4,6 +4,7 @@ import { buildPromptDocument } from "@/features/prompt-engine/build-prompt";
 import { prisma } from "@/lib/prisma";
 import { MockLocalProvider } from "@/services/providers/mock-provider";
 import { OpenAiImageEditingProvider } from "@/services/providers/openai-provider";
+import { FalAiProvider } from "@/services/providers/fal-provider";
 import { getActiveProviderName } from "@/services/providers/provider-registry";
 import { mergePresetSettings } from "@/config/presets";
 import type { GenerationRequestPayload } from "@/types/domain";
@@ -11,18 +12,19 @@ import type { ProviderAdapter } from "@/services/providers/provider-adapter";
 
 const mockProvider = new MockLocalProvider();
 const openAiProvider = new OpenAiImageEditingProvider();
+const falProvider = new FalAiProvider();
 
 function resolveProvider(providerOverride?: string): ProviderAdapter {
-  if (providerOverride === mockProvider.name) {
-    return mockProvider;
-  }
+  // Explicit override
+  if (providerOverride === mockProvider.name) return mockProvider;
+  if (providerOverride === openAiProvider.name) return openAiProvider;
+  if (providerOverride === falProvider.name) return falProvider;
 
-  if (providerOverride === openAiProvider.name) {
-    return openAiProvider;
-  }
-
+  // Auto-select based on active provider setting
   const activeProvider = getActiveProviderName();
-  return activeProvider === openAiProvider.name ? openAiProvider : mockProvider;
+  if (activeProvider === falProvider.name) return falProvider;
+  if (activeProvider === openAiProvider.name) return openAiProvider;
+  return mockProvider;
 }
 
 export async function createGenerationJob(input: GenerationRequestPayload) {
@@ -132,6 +134,8 @@ export async function createGenerationJob(input: GenerationRequestPayload) {
       imageVersionId: imageVersion.id,
       promptDocument,
       settings: mergedSettings,
+      // Pass fidelity metadata to the caller if available (Fal.ai provider)
+      fidelity: (result.metadata as Record<string, unknown>)?.fidelity ?? null,
     };
   } catch (error) {
     await prisma.generationLog.update({
