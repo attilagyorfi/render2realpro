@@ -761,7 +761,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
               </div>
             </div>
             {/* Content */}
-            <div className="min-h-0 flex-1 p-4 flex gap-4">
+            <div className="min-h-0 flex-1 p-4 flex gap-4 overflow-hidden">
               {/* Main image area */}
               <div className="min-h-0 flex-1 flex flex-col">
                 {compareEnabled && hasGeneratedVersion ? (
@@ -785,30 +785,74 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                   />
                 )}
               </div>
-              {/* Version picker sidebar — only when compare is OFF */}
-              {!compareEnabled && hasGeneratedVersion && (
-                <div className="flex w-48 shrink-0 flex-col gap-2">
-                  <div className="text-[0.6rem] uppercase tracking-[0.2em] text-zinc-600">
-                    {language === "hu" ? "Verziók" : "Versions"}
-                  </div>
-                  {selectedAsset?.imageVersions.map((version) => {
-                    const isActive = version.id === selectedVersion?.id;
-                    return (
-                      <button
-                        key={version.id}
-                        type="button"
-                        onClick={() => setSelectedAsset(selectedAsset.id, version.id)}
-                        className={`flex items-center gap-2 rounded-[14px] border px-3 py-2 text-left text-xs transition ${
-                          isActive
-                            ? "border-blue-500/40 bg-blue-500/10 text-blue-200"
-                            : "border-white/8 bg-white/3 text-zinc-400 hover:bg-white/5"
-                        }`}
-                      >
-                        <ImageIcon className={`size-3 shrink-0 ${isActive ? "text-blue-400" : "text-zinc-600"}`} />
-                        {formatVersionLabel(version.versionType, language)}
-                      </button>
-                    );
-                  })}
+
+              {/* Right panel: version picker + sliders — always visible when compare is OFF */}
+              {!compareEnabled && selectedAsset && (
+                <div
+                  className="flex w-56 shrink-0 flex-col gap-4 overflow-y-auto rounded-[20px] border border-white/8 bg-[#0a0d14] p-4"
+                  style={{ pointerEvents: "auto" }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onMouseDown={(e) => e.stopPropagation()}
+                >
+                  {/* Version picker */}
+                  {selectedAsset.imageVersions.length > 0 && (
+                    <div className="flex flex-col gap-2">
+                      <div className="text-[0.6rem] uppercase tracking-[0.2em] text-zinc-600">
+                        {language === "hu" ? "Verziók" : "Versions"}
+                      </div>
+                      {selectedAsset.imageVersions.map((version) => {
+                        const isActive = version.id === selectedVersion?.id;
+                        const isGenerated = version.versionType !== "original";
+                        return (
+                          <button
+                            key={version.id}
+                            type="button"
+                            onClick={() => setSelectedAsset(selectedAsset.id, version.id)}
+                            className={`flex items-center gap-2 rounded-[14px] border px-3 py-2 text-left text-xs transition ${
+                              isActive
+                                ? "border-blue-500/40 bg-blue-500/10 text-blue-200"
+                                : "border-white/8 bg-white/3 text-zinc-400 hover:bg-white/5"
+                            }`}
+                          >
+                            <ImageIcon className={`size-3 shrink-0 ${isActive ? "text-blue-400" : isGenerated ? "text-violet-400" : "text-zinc-600"}`} />
+                            <span className="truncate">{formatVersionLabel(version.versionType, language)}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Divider */}
+                  {selectedAsset.imageVersions.length > 0 && <div className="border-t border-white/8" />}
+
+                  {/* Full slider panel */}
+                  {!customPromptEnabled && (
+                    <div className="flex flex-col gap-3">
+                      <div className="text-[0.6rem] uppercase tracking-[0.2em] text-zinc-600">
+                        {language === "hu" ? "Színek & fény" : "Color & Light"}
+                      </div>
+                      {sliderControls.map((ctrl) => (
+                        <div key={ctrl.key} className="flex flex-col gap-1.5">
+                          <div className="flex items-center justify-between text-xs text-zinc-400">
+                            <span>{t(ctrl.labelKey, language)}</span>
+                            <span className="font-mono text-zinc-600">{String(editor[ctrl.key as keyof typeof editor])}</span>
+                          </div>
+                          <div
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                          >
+                            <Slider
+                              value={[Number(editor[ctrl.key as keyof typeof editor])]}
+                              min={ctrl.min}
+                              max={ctrl.max}
+                              step={1}
+                              onValueChange={(v) => setEditorValue(ctrl.key as keyof typeof editor, (Array.isArray(v) ? v[0] : v) as never)}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
