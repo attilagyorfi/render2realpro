@@ -57,6 +57,11 @@ export class FalAiProvider implements ProviderAdapter {
     }
     formData.append("realism_level", String(realismLevel));
     formData.append("output_format", "png");
+    // Pass enableUpscaling if set in settingsOverride
+    const enableUpscaling = (input.prompt.settings as Record<string, unknown>)?.enableUpscaling;
+    if (enableUpscaling) {
+      formData.append("enable_upscaling", "true");
+    }
 
     // ── Call FastAPI microservice (with 5-minute timeout) ────────────────────
     const controller = new AbortController();

@@ -506,6 +506,8 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
   const [inpaintingOpen, setInpaintingOpen] = useState(false);
   // Track when generation started for progress estimation
   const [generationStartedAt, setGenerationStartedAt] = useState<number>(Date.now());
+  // Optional creative upscaling (2x via fal-ai/creative-upscaler)
+  const [enableUpscaling, setEnableUpscaling] = useState(false);
 
   // ESC key to close fullscreen
   useEffect(() => {
@@ -634,6 +636,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
           presetId: customPromptEnabled ? undefined : activePresetId,
           customPrompt: customPromptEnabled ? customPromptText : undefined,
           providerOverride,
+          settingsOverride: { enableUpscaling },
         }),
       }),
     onMutate: () => {
@@ -1427,15 +1430,17 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                       const isGenerated = version.versionType === "realism_pass" || version.versionType === "texture_pass";
                       const isActive = version.id === selectedVersion?.id;
                       return (
-                        <button
+                        <div
                           key={version.id}
-                          type="button"
+                          role="button"
+                          tabIndex={0}
                           onClick={() => {
                             // Select the version and disable compare so the selected image is shown
                             setSelectedAsset(selectedAsset.id, version.id);
                             setCompareEnabled(false);
                           }}
-                          className={`flex items-center justify-between rounded-[18px] border px-3 py-2.5 text-left transition ${
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setSelectedAsset(selectedAsset.id, version.id); setCompareEnabled(false); } }}
+                          className={`flex cursor-pointer items-center justify-between rounded-[18px] border px-3 py-2.5 text-left transition ${
                             isActive
                               ? "border-blue-500/40 bg-blue-500/10"
                               : "border-white/8 bg-white/3 hover:bg-white/5"
@@ -1477,7 +1482,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                               {isGenerated ? t("common.generated", language) : t("common.saved", language)}
                             </Badge>
                           </div>
-                        </button>
+                        </div>
                       );
                     })}
                   </div>
@@ -1622,6 +1627,27 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                         </Button>
                       </div>
                     )}
+                  </div>
+
+                  <Separator />
+
+                  {/* ── UPSCALING TOGGLE ───────────────────────────────────────────────── */}
+                  <div className="flex flex-col gap-3">
+                    <label className="flex cursor-pointer items-center gap-3">
+                      <div className="relative shrink-0">
+                        <input type="checkbox" className="sr-only" checked={enableUpscaling} onChange={(e) => setEnableUpscaling(e.target.checked)} />
+                        <div className={`h-5 w-9 rounded-full border transition-colors ${enableUpscaling ? "border-violet-500/50 bg-violet-500" : "border-white/20 bg-white/10"}`} />
+                        <div className={`absolute top-0.5 size-4 rounded-full bg-white shadow transition-transform ${enableUpscaling ? "translate-x-4" : "translate-x-0.5"}`} />
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium text-zinc-200">
+                          {language === "hu" ? "2× Upscaling" : "2× Upscaling"}
+                        </div>
+                        <div className="text-xs text-zinc-500">
+                          {language === "hu" ? "Kreátív részletjavítás (lassabb)" : "Creative detail enhancement (slower)"}
+                        </div>
+                      </div>
+                    </label>
                   </div>
 
                   <Separator />
