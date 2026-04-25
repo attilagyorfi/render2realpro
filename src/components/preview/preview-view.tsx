@@ -23,7 +23,7 @@ const previewContent = {
     badge: "Guided walkthrough",
     title: "Guided product preview",
     subtitle:
-      "This page explains what the main areas of Render2Real Pro do before the user enters the application workspace.",
+      "This page explains what the main areas of FormaReal do before the user enters the application workspace.",
     ctaPrimary: "Create free account",
     ctaSecondary: "Back to landing",
     themeDark: "Dark",
@@ -62,7 +62,7 @@ const previewContent = {
     badge: "Vezetett bemutató",
     title: "Vezetett termékbemutató",
     subtitle:
-      "Ez az oldal bemutatja, hogy a Render2Real Pro fő felületei mire szolgálnak, mielőtt a felhasználó belépne az alkalmazás workspace-ébe.",
+      "Ez az oldal bemutatja, hogy a FormaReal fő felületei mire szolgálnak, mielőtt a felhasználó belépne az alkalmazás workspace-ébe.",
     ctaPrimary: "Ingyenes fiók létrehozása",
     ctaSecondary: "Vissza a landing oldalra",
     themeDark: "Sötét",
@@ -109,7 +109,7 @@ export function PreviewView() {
         <div className="mx-auto flex w-full max-w-[1680px] items-center justify-between gap-4 px-6 py-4">
           <div className="flex min-w-0 flex-col">
             <span className="text-[0.68rem] uppercase tracking-[0.28em] text-muted-foreground">
-              Render2Real Pro
+              FormaReal
             </span>
             <h1 className="font-heading text-xl font-semibold tracking-tight">
               {copy.headerTitle}

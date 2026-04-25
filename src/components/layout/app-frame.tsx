@@ -88,7 +88,7 @@ export function AppFrame({
           <div className="flex items-center gap-3 min-w-0">
             {/* Logo — decorative only inside the app (not clickable) */}
             <div className="flex items-center gap-2.5 shrink-0">
-              <Image src="/logo.png" alt="Render2Real Pro" width={30} height={30} className="rounded-lg" />
+              <Image src="/logo.png" alt="FormaReal" width={30} height={30} className="rounded-lg" />
               <span className="hidden font-heading text-sm font-semibold tracking-tight text-foreground md:block">
                 render2real <span className="text-blue-400">pro</span>
               </span>

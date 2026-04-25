@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   ArrowRight,
@@ -18,9 +19,10 @@ import { useAppPreferencesStore } from "@/store/app-preferences";
 
 export function DashboardView() {
   const language = useAppPreferencesStore((state) => state.language);
+  const router = useRouter();
 
   return (
-    <AppFrame eyebrow={t("common.appEyebrow", language)} title="Render2Real Pro">
+    <AppFrame eyebrow={t("common.appEyebrow", language)} title="FormaReal">
       <div className="grid gap-5">
 
         {/* ── HERO BANNER ──────────────────────────────────────────────────── */}
@@ -84,7 +86,9 @@ export function DashboardView() {
             </div>
 
             <div className="flex items-start">
-              <ProjectCreateForm />
+              <ProjectCreateForm onCreated={(projectId) => {
+                if (projectId) router.push(`/app/projects/${projectId}`);
+              }} />
             </div>
           </div>
         </motion.section>

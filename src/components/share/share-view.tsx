@@ -79,7 +79,7 @@ export function ShareView({ token }: { token: string }) {
       <header className="sticky top-0 z-30 border-b border-white/10 bg-[#0a0d14]/80 backdrop-blur-xl px-6 py-4">
         <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4">
           <div>
-            <p className="text-[0.65rem] uppercase tracking-[0.28em] text-zinc-500">Render2Real Pro · Megosztott projekt</p>
+            <p className="text-[0.65rem] uppercase tracking-[0.28em] text-zinc-500">FormaReal · Megosztott projekt</p>
             <h1 className="text-xl font-semibold tracking-tight text-zinc-100">{project.name}</h1>
             {project.clientName && (
               <p className="text-xs text-zinc-500">{project.clientName}</p>
@@ -167,7 +167,7 @@ export function ShareView({ token }: { token: string }) {
 
       {/* Footer */}
       <footer className="mt-16 border-t border-white/8 px-6 py-6 text-center text-xs text-zinc-700">
-        Render2Real Pro · Automatikus fotorealisztikus megjelenítés AI segítségével
+        FormaReal · Automatikus fotorealisztikus megjelenítés AI segítségével
       </footer>
     </div>
   );

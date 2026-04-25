@@ -308,10 +308,9 @@ function ZoomableImagePanel({
 
 // ─── Loading overlay ──────────────────────────────────────────────────────────
 
-function GeneratingOverlay({ language, startedAt }: { language: string; startedAt: number }) {
-  // Heuristic progress: Fal.ai Flux ControlNet typically takes 60–180s
-  // We simulate progress based on elapsed time with a logarithmic curve
-  const ESTIMATED_TOTAL_MS = 120_000; // 2 minutes as baseline estimate
+function GeneratingOverlay({ language, startedAt, quality = "medium" }: { language: string; startedAt: number; quality?: "low" | "medium" | "high" }) {
+  // Heuristic progress: GPT Image 2 quality-based timing
+  const ESTIMATED_TOTAL_MS = quality === "low" ? 20_000 : quality === "high" ? 90_000 : 50_000;
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
@@ -509,6 +508,10 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
   // Optional creative upscaling (2x via fal-ai/creative-upscaler)
   const [enableUpscaling, setEnableUpscaling] = useState(false);
   const [generationQuality, setGenerationQuality] = useState<"low" | "medium" | "high">("medium");
+  const [presetEnabled, setPresetEnabled] = useState(false);
+  const [newPresetDialogOpen, setNewPresetDialogOpen] = useState(false);
+  const [newPresetName, setNewPresetName] = useState("");
+  const [isSavingPreset, setIsSavingPreset] = useState(false);
 
   // ESC key to close fullscreen
   useEffect(() => {
@@ -657,9 +660,9 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
         upsertQueueEntry({ id: selectedAsset.id, label: selectedAsset.originalFileName, progress: 100, status: "completed", message: t("workspace.generationSaved", language) });
       }
       toast.success(t("workspace.generationCompleted", language));
+      // Delay comparison enable slightly to avoid flash/glitch during data refresh
+      setTimeout(() => setCompareEnabled(true), 300);
       queryClient.invalidateQueries({ queryKey: ["project", projectId] });
-      // Auto-enable comparison so user immediately sees before/after result
-      setCompareEnabled(true);
       // Extract fidelity score if Fal.ai provider was used
       const fidelity = (data as { generation?: { fidelity?: FidelityScore } })?.generation?.fidelity;
       if (fidelity) setLastFidelityScore(fidelity);
@@ -995,7 +998,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                   {selectedAsset.imageVersions.length > 0 && <div className="border-t border-white/8" />}
 
                   {/* Full slider panel */}
-                  {!customPromptEnabled && (
+                  {!customPromptEnabled && presetEnabled && (
                     <div className="flex flex-col gap-3">
                       <div className="text-[0.6rem] uppercase tracking-[0.2em] text-zinc-600">
                         {language === "hu" ? "Színek & fény" : "Color & Light"}
@@ -1312,54 +1315,40 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
               </div>
             )}
 
-            {/* ── MAIN CANVAS: comparison slider OR original reference ─────── */}
+            {/* ── ORIGINAL IMAGE (top) — always shows the original render, no filter ─── */}
             <div className="relative min-h-0 flex-1">
               <AnimatePresence>
-                {isGenerating && <GeneratingOverlay language={language} startedAt={generationStartedAt} />}
+                {isGenerating && <GeneratingOverlay language={language} startedAt={generationStartedAt} quality={generationQuality} />}
               </AnimatePresence>
               {isLoading ? (
                 <div className="h-full rounded-[28px] bg-white/5 animate-pulse" />
-              ) : compareEnabled && hasGeneratedVersion ? (
-                comparisonPanel
               ) : (
                 <ZoomableImagePanel
-                  src={displayUrl}
-                  alt={language === "hu" ? "Előnézet" : "Preview"}
-                  label={language === "hu" ? "Előnézet" : "Preview"}
-                  badge={
-                    selectedVersion && hasGeneratedVersion ? (
-                      <Badge variant="outline" className="border-violet-500/30 bg-violet-500/10 text-violet-300 text-[0.65rem]">
-                        {formatVersionLabel(selectedVersion.versionType, language)}
-                      </Badge>
-                    ) : undefined
-                  }
+                  src={originalVersion?.fileUrl ?? referenceUrl}
+                  alt={language === "hu" ? "Eredeti render" : "Original render"}
+                  label={language === "hu" ? "Eredeti render" : "Original render"}
                   emptyText={language === "hu" ? "Tölts fel egy képet" : "Upload an image"}
-                  filterStyle={filterStyle}
                   onFullscreen={() => setFullscreenOpen(true)}
                   className="h-full"
                 />
               )}
             </div>
-            {/* ── PREVIEW IMAGE (bottom) ─────────────────────────────────────────────────── */}
+            {/* ── PREVIEW IMAGE (bottom) — shows generated result with preset filter ─── */}
             <ZoomableImagePanel
-              src={displayUrl}
+              src={hasGeneratedVersion ? (compareVersion?.fileUrl ?? displayUrl) : displayUrl}
               alt={language === "hu" ? "Előnézeti kép" : "Preview image"}
               label={language === "hu" ? "Előnézeti kép" : "Preview image"}
               badge={
-                selectedVersion ? (
-                  <Badge variant="outline" className={`text-[0.6rem] px-1.5 py-0 ${
-                    selectedVersion.versionType !== "original"
-                      ? "border-violet-500/30 bg-violet-500/10 text-violet-300"
-                      : "border-white/10 text-zinc-500"
-                  }`}>
-                    {formatVersionLabel(selectedVersion.versionType, language)}
+                hasGeneratedVersion ? (
+                  <Badge variant="outline" className="border-violet-500/30 bg-violet-500/10 text-violet-300 text-[0.6rem] px-1.5 py-0">
+                    {formatVersionLabel(compareVersion?.versionType ?? "realism", language)}
                   </Badge>
                 ) : undefined
               }
               emptyText={t("workspace.projectFiles", language)}
-              filterStyle={filterStyle}
+              filterStyle={presetEnabled ? filterStyle : undefined}
               onFullscreen={() => setFullscreenOpen(true)}
-              className="shrink-0"
+              className="shrink-0 min-h-0 flex-1"
             />         {/* Queue status bar */}
             <div className="rounded-[20px] border border-white/8 bg-[#0a0d14] px-4 py-3 shrink-0">
               <div className="flex items-center justify-between">
@@ -1495,7 +1484,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                     <Button
                       size="default"
                       onClick={() => generateMutation.mutate(undefined)}
-                      disabled={!selectedAsset || !activePresetId || isGenerating || batchGenerating || customPromptEnabled}
+                      disabled={!selectedAsset || (presetEnabled && !activePresetId) || isGenerating || batchGenerating || customPromptEnabled}
                       className="w-full bg-gradient-to-r from-blue-600 to-violet-600 hover:from-blue-500 hover:to-violet-500 text-white font-semibold shadow-lg shadow-blue-500/20 border-0 h-11"
                     >
                       <Sparkles className="size-4 mr-2" />
@@ -1509,7 +1498,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                         size="sm"
                         variant="outline"
                         onClick={handleBatchGenerate}
-                        disabled={!activePresetId || isGenerating || batchGenerating || customPromptEnabled}
+                        disabled={(presetEnabled && !activePresetId) || isGenerating || batchGenerating || customPromptEnabled}
                         className="w-full border-white/10 text-zinc-300 hover:bg-white/5"
                       >
                         <Sparkles className="size-3.5 mr-1.5" />
@@ -1533,13 +1522,24 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
 
                   {/* ── PRESET ────────────────────────────────────────────── */}
                   <div className="flex flex-col gap-2">
-                    <div className="text-xs uppercase tracking-[0.24em] text-zinc-500">
-                      {t("workspace.preset", language)}
+                    <div className="flex items-center justify-between">
+                      <div className="text-xs uppercase tracking-[0.24em] text-zinc-500">
+                        {t("workspace.preset", language)}
+                      </div>
+                      {/* Preset enabled toggle */}
+                      <label className="flex cursor-pointer items-center gap-2">
+                        <span className="text-xs text-zinc-500">{presetEnabled ? (language === "hu" ? "Be" : "On") : (language === "hu" ? "Ki" : "Off")}</span>
+                        <div className="relative shrink-0">
+                          <input type="checkbox" className="sr-only" checked={presetEnabled} onChange={(e) => setPresetEnabled(e.target.checked)} />
+                          <div className={`h-5 w-9 rounded-full border transition-colors ${presetEnabled ? "border-violet-500/50 bg-violet-500" : "border-white/20 bg-white/10"}`} />
+                          <div className={`absolute top-0.5 size-4 rounded-full bg-white shadow transition-transform ${presetEnabled ? "translate-x-4" : "translate-x-0.5"}`} />
+                        </div>
+                      </label>
                     </div>
                     <Select
                       value={getControlledSelectValue(activePresetId)}
                       onValueChange={(value) => setActivePresetId(value || undefined)}
-                      disabled={customPromptEnabled}
+                      disabled={customPromptEnabled || !presetEnabled}
                     >
                       <SelectTrigger>
                         {/* Show human-readable preset name instead of raw ID */}
@@ -1556,6 +1556,15 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                               {t(`preset.${preset.name}`, language)}
                             </SelectItem>
                           ))}
+                        </SelectGroup>
+                        <SelectGroup>
+                          <div
+                            className="flex items-center gap-2 px-2 py-1.5 text-xs text-violet-400 cursor-pointer hover:bg-white/5 rounded-sm"
+                            onMouseDown={(e) => { e.preventDefault(); setNewPresetDialogOpen(true); }}
+                          >
+                            <span className="text-base leading-none">+</span>
+                            <span>{language === "hu" ? "Új preset létrehozása" : "Create new preset"}</span>
+                          </div>
                         </SelectGroup>
                       </SelectContent>
                     </Select>
@@ -1659,10 +1668,10 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                     </div>
                     <div className="text-[0.65rem] text-zinc-600">
                       {generationQuality === "low"
-                        ? (language === "hu" ? "~15s · $0.04/kép" : "~15s · $0.04/image")
+                        ? (language === "hu" ? "~15 másodperc" : "~15 seconds")
                         : generationQuality === "medium"
-                        ? (language === "hu" ? "~45s · $0.07/kép" : "~45s · $0.07/image")
-                        : (language === "hu" ? "~90s · $0.22/kép" : "~90s · $0.22/image")}
+                        ? (language === "hu" ? "~45 másodperc" : "~45 seconds")
+                        : (language === "hu" ? "~90 másodperc" : "~90 seconds")}
                     </div>
                   </div>
                   <Separator />
@@ -1769,6 +1778,86 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
     <OnboardingTour language={language} />
 
     {/* ── Inpainting Canvas Overlay ────────────────────────────────── */}
+    {/* ── NEW PRESET DIALOG ─────────────────────────────────────────────────── */}
+    {newPresetDialogOpen && (
+      <div className="fixed inset-0 z-[110] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
+        <div className="w-full max-w-md rounded-[24px] border border-white/10 bg-[#0d1017] p-6 flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold text-zinc-100">{language === "hu" ? "Új preset létrehozása" : "Create new preset"}</h2>
+            <button type="button" onClick={() => setNewPresetDialogOpen(false)} className="text-zinc-500 hover:text-zinc-200 transition-colors">✕</button>
+          </div>
+          <div className="flex flex-col gap-2">
+            <label className="text-xs text-zinc-400">{language === "hu" ? "Preset neve" : "Preset name"}</label>
+            <input
+              type="text"
+              value={newPresetName}
+              onChange={(e) => setNewPresetName(e.target.value)}
+              placeholder={language === "hu" ? "pl. Naplemente realizmus" : "e.g. Sunset realism"}
+              className="rounded-[10px] border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 outline-none focus:border-violet-500/50"
+            />
+          </div>
+          <div className="flex flex-col gap-3">
+            {sliderControls.map((control) => (
+              <div key={control.key} className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between text-xs text-zinc-400">
+                  <span>{t(control.labelKey, language)}</span>
+                  <span className="text-zinc-500">{String(editor[control.key as keyof typeof editor])}</span>
+                </div>
+                <Slider
+                  value={[Number(editor[control.key as keyof typeof editor])]}
+                  min={control.min}
+                  max={control.max}
+                  step={1}
+                  onValueChange={(nextValue) => {
+                    const value = Array.isArray(nextValue) ? nextValue[0] : nextValue;
+                    setEditorValue(control.key as keyof typeof editor, value as never);
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-3 pt-2">
+            <Button variant="outline" size="sm" className="flex-1 border-white/10 text-zinc-400" onClick={() => setNewPresetDialogOpen(false)}>
+              {language === "hu" ? "Mégse" : "Cancel"}
+            </Button>
+            <Button
+              size="sm"
+              className="flex-1 bg-violet-600 hover:bg-violet-500 text-white"
+              disabled={!newPresetName.trim() || isSavingPreset}
+              onClick={async () => {
+                if (!newPresetName.trim()) return;
+                setIsSavingPreset(true);
+                try {
+                  const res = await fetch("/api/admin/presets", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      name: newPresetName.trim().toLowerCase().replace(/\s+/g, "-"),
+                      description: newPresetName.trim(),
+                      category: "custom",
+                      settingsJson: JSON.stringify(editor),
+                    }),
+                  });
+                  if (!res.ok) throw new Error("Failed to save preset");
+                  const { preset } = await res.json();
+                  await queryClient.invalidateQueries({ queryKey: ["project", projectId] });
+                  setActivePresetId(preset.id);
+                  setNewPresetDialogOpen(false);
+                  setNewPresetName("");
+                  toast.success(language === "hu" ? "Preset elmentve!" : "Preset saved!");
+                } catch (e) {
+                  toast.error(language === "hu" ? "Hiba a mentés során" : "Failed to save preset");
+                } finally {
+                  setIsSavingPreset(false);
+                }
+              }}
+            >
+              {isSavingPreset ? "…" : (language === "hu" ? "Mentés" : "Save")}
+            </Button>
+          </div>
+        </div>
+      </div>
+    )}
     {inpaintingOpen && selectedAsset && displayUrl && (
       <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
         <InpaintingCanvas

@@ -3,7 +3,7 @@ import "./globals.css";
 import { AppProviders } from "./providers";
 
 export const metadata: Metadata = {
-  title: "Render2Real Pro",
+  title: "FormaReal",
   description: "Architectural render realism enhancement without redesigning the composition.",
 };
 

@@ -79,7 +79,7 @@ export function buildPromptDocument(input: BuildPromptInput): PromptDocument {
       : "";
 
   const fullPrompt = [
-    `Render2Real Pro realism enhancement for ${input.imageName}.`,
+    `FormaReal realism enhancement for ${input.imageName}.`,
     `Preset: ${input.presetName}.`,
     `Preservation rules: ${sections.preservationRules.join(", ")}.`,
     `Realism enhancement rules: ${sections.realismEnhancementRules.join(", ")}.`,
