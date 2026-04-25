@@ -43,8 +43,9 @@ export class FalAiProvider implements ProviderAdapter {
     }
     const userPrompt = promptParts.join(" ");
 
-    // ── Map slider values to realism_level ──────────────────────────────────
-    const realismLevel = 0.5; // default; can be extended to use slider values
+    // ── Map settings to quality (low | medium | high) ───────────────────────
+    const settings = (input.prompt.settings as Record<string, unknown>) ?? {};
+    const quality = (settings.quality as string) ?? "medium";
 
     // ── Build multipart form data ────────────────────────────────────────────
     const formData = new FormData();
@@ -55,10 +56,10 @@ export class FalAiProvider implements ProviderAdapter {
     if (userPrompt) {
       formData.append("prompt", userPrompt);
     }
-    formData.append("realism_level", String(realismLevel));
-    formData.append("output_format", "png");
+    formData.append("quality", quality);
+    formData.append("output_format", "jpeg");
     // Pass enableUpscaling if set in settingsOverride
-    const enableUpscaling = (input.prompt.settings as Record<string, unknown>)?.enableUpscaling;
+    const enableUpscaling = settings.enableUpscaling;
     if (enableUpscaling) {
       formData.append("enable_upscaling", "true");
     }

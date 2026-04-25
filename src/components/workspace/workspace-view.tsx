@@ -508,6 +508,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
   const [generationStartedAt, setGenerationStartedAt] = useState<number>(Date.now());
   // Optional creative upscaling (2x via fal-ai/creative-upscaler)
   const [enableUpscaling, setEnableUpscaling] = useState(false);
+  const [generationQuality, setGenerationQuality] = useState<"low" | "medium" | "high">("medium");
 
   // ESC key to close fullscreen
   useEffect(() => {
@@ -636,7 +637,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
           presetId: customPromptEnabled ? undefined : activePresetId,
           customPrompt: customPromptEnabled ? customPromptText : undefined,
           providerOverride,
-          settingsOverride: { enableUpscaling },
+          settingsOverride: { enableUpscaling, quality: generationQuality },
         }),
       }),
     onMutate: () => {
@@ -1631,6 +1632,40 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
 
                   <Separator />
 
+                  {/* ── QUALITY SELECTOR ─────────────────────────────────────────────── */}
+                  <div className="flex flex-col gap-2">
+                    <div className="text-xs font-medium text-zinc-400">
+                      {language === "hu" ? "Generálás minősége" : "Generation quality"}
+                    </div>
+                    <div className="flex gap-2">
+                      {(["low", "medium", "high"] as const).map((q) => (
+                        <button
+                          key={q}
+                          type="button"
+                          onClick={() => setGenerationQuality(q)}
+                          className={`flex-1 rounded-md border px-2 py-1.5 text-xs font-medium transition-colors ${
+                            generationQuality === q
+                              ? "border-violet-500 bg-violet-500/20 text-violet-300"
+                              : "border-white/10 bg-white/5 text-zinc-400 hover:border-white/20 hover:text-zinc-300"
+                          }`}
+                        >
+                          {q === "low"
+                            ? (language === "hu" ? "Gyors" : "Fast")
+                            : q === "medium"
+                            ? (language === "hu" ? "Közepes" : "Medium")
+                            : (language === "hu" ? "Magas" : "High")}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="text-[0.65rem] text-zinc-600">
+                      {generationQuality === "low"
+                        ? (language === "hu" ? "~15s · $0.04/kép" : "~15s · $0.04/image")
+                        : generationQuality === "medium"
+                        ? (language === "hu" ? "~45s · $0.07/kép" : "~45s · $0.07/image")
+                        : (language === "hu" ? "~90s · $0.22/kép" : "~90s · $0.22/image")}
+                    </div>
+                  </div>
+                  <Separator />
                   {/* ── UPSCALING TOGGLE ───────────────────────────────────────────────── */}
                   <div className="flex flex-col gap-3">
                     <label className="flex cursor-pointer items-center gap-3">
