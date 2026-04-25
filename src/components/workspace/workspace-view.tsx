@@ -1571,7 +1571,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                   </div>
 
                   {/* ── SLIDERS ───────────────────────────────────────────── */}
-                  {!customPromptEnabled && (
+                  {!customPromptEnabled && presetEnabled && (
                     <div className="flex flex-col gap-3">
                       {sliderControls.map((control) => (
                         <div key={control.key} className="flex flex-col gap-2">
