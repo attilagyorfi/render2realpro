@@ -90,7 +90,7 @@ export function AppFrame({
             <div className="flex items-center gap-2.5 shrink-0">
               <Image src="/logo.png" alt="FormaReal" width={30} height={30} className="rounded-lg" />
               <span className="hidden font-heading text-sm font-semibold tracking-tight text-foreground md:block">
-                render2real <span className="text-blue-400">pro</span>
+                FormaReal
               </span>
             </div>
             <div className="h-5 w-px bg-white/10 hidden md:block" />
