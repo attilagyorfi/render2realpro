@@ -310,7 +310,8 @@ function ZoomableImagePanel({
 
 function GeneratingOverlay({ language, startedAt, quality = "medium" }: { language: string; startedAt: number; quality?: "low" | "medium" | "high" }) {
   // Heuristic progress: GPT Image 2 quality-based timing
-  const ESTIMATED_TOTAL_MS = quality === "low" ? 20_000 : quality === "high" ? 90_000 : 50_000;
+  // Flux Canny Pro typical timing: low ~90s, medium ~150s, high ~210s
+  const ESTIMATED_TOTAL_MS = quality === "low" ? 90_000 : quality === "high" ? 210_000 : 150_000;
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
