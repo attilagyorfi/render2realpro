@@ -6,13 +6,45 @@ import { MockLocalProvider } from "@/services/providers/mock-provider";
 import { OpenAiImageEditingProvider } from "@/services/providers/openai-provider";
 import { FalAiProvider } from "@/services/providers/fal-provider";
 import { getActiveProviderName } from "@/services/providers/provider-registry";
+import { classifyGenerationFailure } from "@/services/image-processing/generation-errors";
 import { mergePresetSettings } from "@/config/presets";
 import type { GenerationRequestPayload } from "@/types/domain";
-import type { ProviderAdapter } from "@/services/providers/provider-adapter";
+import type {
+  ProviderAdapter,
+  ProviderGenerateInput,
+  ProviderGenerateResult,
+} from "@/services/providers/provider-adapter";
 
 const mockProvider = new MockLocalProvider();
 const openAiProvider = new OpenAiImageEditingProvider();
 const falProvider = new FalAiProvider();
+
+const MAX_PROVIDER_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 1000;
+
+async function callProviderWithRetry(
+  provider: ProviderAdapter,
+  payload: ProviderGenerateInput,
+): Promise<{ result: ProviderGenerateResult; attempts: number; transientErrors: string[] }> {
+  const transientErrors: string[] = [];
+  for (let attempt = 1; attempt <= MAX_PROVIDER_ATTEMPTS; attempt++) {
+    try {
+      const result = await provider.generateRealismPass(payload);
+      return { result, attempts: attempt, transientErrors };
+    } catch (error) {
+      const failure = classifyGenerationFailure(error);
+      const message = error instanceof Error ? error.message : String(error);
+      transientErrors.push(`attempt ${attempt}: ${message}`);
+      const isLastAttempt = attempt === MAX_PROVIDER_ATTEMPTS;
+      if (!failure.retryable || isLastAttempt) {
+        throw error;
+      }
+      const delayMs = RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw new Error("Unreachable: provider retry loop exhausted without resolution.");
+}
 
 function resolveProvider(providerOverride?: string): ProviderAdapter {
   // Explicit override
@@ -90,7 +122,7 @@ export async function createGenerationJob(input: GenerationRequestPayload) {
       data: { status: GenerationLogStatus.processing },
     });
 
-    const result = await provider.generateRealismPass({
+    const { result, attempts, transientErrors } = await callProviderWithRetry(provider, {
       projectId: imageAsset.projectId,
       sourcePath: imageAsset.storedFilePath,
       sourceWidth: imageAsset.width ?? undefined,
@@ -103,6 +135,11 @@ export async function createGenerationJob(input: GenerationRequestPayload) {
       },
     });
 
+    const versionMetadata = {
+      ...result.metadata,
+      retry: { attempts, transientErrors },
+    };
+
     const imageVersion = await prisma.imageVersion.create({
       data: {
         imageAssetId: imageAsset.id,
@@ -111,7 +148,7 @@ export async function createGenerationJob(input: GenerationRequestPayload) {
         promptUsed: promptDocument.fullPrompt,
         presetUsed: preset.name,
         settingsJson: JSON.stringify(mergedSettings),
-        metadataJson: JSON.stringify(result.metadata),
+        metadataJson: JSON.stringify(versionMetadata),
       },
     });
 
