@@ -1287,7 +1287,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                 <p className="mt-2 text-sm leading-6 text-amber-50/85">{generationFallback.message}</p>
                 <div className="mt-4 flex flex-wrap gap-3">
                   {generationFallback.retryable && (
-                    <Button variant="outline" size="sm" onClick={() => generateMutation.mutate(undefined)} disabled={isGenerating}>{t("workspace.retryWithOpenAi", language)}</Button>
+                    <Button variant="outline" size="sm" onClick={() => generateMutation.mutate(undefined)} disabled={isGenerating}>{t("workspace.retryGeneration", language)}</Button>
                   )}
                   {generationFallback.canFallbackToMock && (
                     <Button size="sm" onClick={() => generateMutation.mutate(generationFallback.fallbackProvider ?? "mock-local")} disabled={isGenerating}>{t("workspace.runWithMock", language)}</Button>
