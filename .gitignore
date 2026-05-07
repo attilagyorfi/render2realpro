@@ -44,7 +44,8 @@ next-env.d.ts
 # local Codex / app runtime artifacts
 .codex-logs/
 .codex-previews/
-storage/
+# Runtime asset storage at repo root only — do NOT match src/services/storage/
+/storage/
 prisma/dev.db
 coverage/
 prisma/prisma/dev.db
