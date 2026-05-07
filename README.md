@@ -94,10 +94,16 @@ npm run db:seed
 npm run dev
 ```
 
-This project defaults to the webpack dev server for a more stable local development experience on this Windows setup. If you explicitly want the Turbopack dev server, run:
+`npm run dev` uses Turbopack (the Next.js 16 default). If you hit a stale dev cache after editing component state (e.g. a `ReferenceError` for a freshly added `useState` variable), clear `.next` and restart:
 
 ```bash
-npm run dev:turbo
+npm run dev:clean
+```
+
+A webpack-based fallback is still available if Turbopack misbehaves on your environment:
+
+```bash
+npm run dev:webpack
 ```
 
 7. Open the app
