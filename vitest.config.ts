@@ -15,7 +15,12 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "html"],
       include: ["src/**/*.{ts,tsx}"],
-      exclude: ["src/components/ui/**", "src/app/**"],
+      exclude: [
+        "src/components/ui/**",
+        "src/app/**/{page,layout,loading,error,not-found,template,head,robots,sitemap,manifest,icon,favicon}.{ts,tsx}",
+        "src/app/providers.tsx",
+        "src/app/globals.css",
+      ],
     },
   },
 });
