@@ -483,7 +483,8 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
   const [, startTransition] = useTransition();
   const [exportDestination, setExportDestination] = useState<ExportDestinationId>("local");
   const [exportFormat, setExportFormat] = useState<"png" | "jpg" | "webp">("png");
-  const [exportQuality, setExportQuality] = useState(92);
+  // Export JPEG quality is currently fixed; UI control will surface this later.
+  const exportQuality = 92;
   const [exportScale, setExportScale] = useState<1 | 2 | 4>(1);
   const [controlsCollapsed, setControlsCollapsed] = useState(false);
   const [customPromptEnabled, setCustomPromptEnabled] = useState(false);
@@ -504,8 +505,10 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
   const [lastFidelityScore, setLastFidelityScore] = useState<FidelityScore | null>(null);
   // Inpainting canvas open state
   const [inpaintingOpen, setInpaintingOpen] = useState(false);
-  // Track when generation started for progress estimation
-  const [generationStartedAt, setGenerationStartedAt] = useState<number>(Date.now());
+  // Track when generation started for progress estimation. Initialised to 0
+  // (never read before the first onMutate call), avoiding an impure Date.now()
+  // call during render.
+  const [generationStartedAt, setGenerationStartedAt] = useState<number>(0);
   // Optional creative upscaling (2x via fal-ai/creative-upscaler)
   const [enableUpscaling, setEnableUpscaling] = useState(false);
   const [generationQuality, setGenerationQuality] = useState<"low" | "medium" | "high">("medium");
@@ -549,28 +552,24 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
   const project = data?.project;
   const presets = useMemo(() => data?.presets ?? [], [data?.presets]);
 
-  // Sync asset order when project data loads
-  useEffect(() => {
-    if (!project) return;
-    const ids = project.imageAssets.map((a) => a.id);
-    setAssetOrder((prev) => {
-      if (prev.length === 0) return ids;
-      // Merge: keep existing order, append new ones
-      const existing = prev.filter((id) => ids.includes(id));
-      const newOnes = ids.filter((id) => !prev.includes(id));
-      return [...existing, ...newOnes];
-    });
-  }, [project]);
-
-  // Sorted assets based on local assetOrder
+  // Sorted assets — derives the current display order from project data and
+  // any user-applied drag reorder, without storing the merged order back into
+  // state (avoids a setState-in-effect cycle).
   const sortedAssets = useMemo(() => {
     if (!project) return [];
+    const ids = project.imageAssets.map((a) => a.id);
     if (assetOrder.length === 0) return project.imageAssets;
-    return [...project.imageAssets].sort((a, b) => {
-      const ai = assetOrder.indexOf(a.id);
-      const bi = assetOrder.indexOf(b.id);
-      return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
-    });
+    const orderMap = new Map<string, number>();
+    let cursor = 0;
+    for (const id of assetOrder) {
+      if (ids.includes(id) && !orderMap.has(id)) orderMap.set(id, cursor++);
+    }
+    for (const id of ids) {
+      if (!orderMap.has(id)) orderMap.set(id, cursor++);
+    }
+    return [...project.imageAssets].sort(
+      (a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0)
+    );
   }, [project, assetOrder]);
 
   // dnd-kit sensors
@@ -579,16 +578,26 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
-    const { active, over } = event;
-    if (over && active.id !== over.id) {
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
       setAssetOrder((prev) => {
-        const oldIndex = prev.indexOf(active.id as string);
-        const newIndex = prev.indexOf(over.id as string);
-        return arrayMove(prev, oldIndex, newIndex);
+        // Lazily seed the order from current project assets the first time
+        // the user drags, so we don't need a setState-in-effect to keep them
+        // in sync.
+        const seeded =
+          prev.length === 0 && project
+            ? project.imageAssets.map((a) => a.id)
+            : prev;
+        const oldIndex = seeded.indexOf(active.id as string);
+        const newIndex = seeded.indexOf(over.id as string);
+        if (oldIndex === -1 || newIndex === -1) return seeded;
+        return arrayMove(seeded, oldIndex, newIndex);
       });
-    }
-  }, []);
+    },
+    [project]
+  );
   const activeProvider = providerData?.providers.find((p) => p.name === providerData.activeProvider);
   const effectiveProvider = activeProvider?.configured
     ? activeProvider
@@ -844,22 +853,6 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
     if (vignette > 0) parts.push(`brightness(${1 - vignette * 0.002})`);
     return parts.length > 0 ? parts.join(" ") : undefined;
   }, [editor]);
-
-  // Comparison: show original vs selected version
-  const comparisonPanel = useMemo(() => {
-    if (!referenceUrl) return null;
-    const afterUrl = hasGeneratedVersion && compareVersion?.fileUrl ? compareVersion.fileUrl : displayUrl;
-    return (
-      <ComparisonView
-        before={originalVersion?.fileUrl ?? referenceUrl}
-        after={afterUrl ?? referenceUrl}
-        mode="slider"
-        beforeLabel={language === "hu" ? "Eredeti render" : "Original render"}
-        afterLabel={language === "hu" ? "AI-javított eredmény" : "AI-enhanced result"}
-        afterFilterStyle={filterStyle}
-      />
-    );
-  }, [referenceUrl, hasGeneratedVersion, compareVersion, displayUrl, originalVersion, language, filterStyle]);
 
   return (
     <>
@@ -1846,7 +1839,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                   setNewPresetDialogOpen(false);
                   setNewPresetName("");
                   toast.success(language === "hu" ? "Preset elmentve!" : "Preset saved!");
-                } catch (e) {
+                } catch (_error) {
                   toast.error(language === "hu" ? "Hiba a mentés során" : "Failed to save preset");
                 } finally {
                   setIsSavingPreset(false);
@@ -1867,7 +1860,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
           imageHeight={selectedAsset.height ?? 768}
           projectId={projectId}
           assetId={selectedAsset.id}
-          onResult={(resultDataUri) => {
+          onResult={() => {
             toast.success(language === "hu" ? "Anyagcsere alkalmazva!" : "Material applied!");
             setInpaintingOpen(false);
             // Refresh project data to pick up any saved version

@@ -53,6 +53,11 @@ export function OnboardingTour({ language = "en" }: { language?: string }) {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const seen = localStorage.getItem(TOUR_KEY);
+    // One-time client-only sync with localStorage on mount. SSR returns
+    // visible=false; the effect promotes it to true if the user hasn't
+    // seen the tour yet. Cannot be expressed as a lazy initializer
+    // without risking a hydration mismatch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!seen) setVisible(true);
   }, []);
 

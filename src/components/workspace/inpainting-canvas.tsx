@@ -50,8 +50,10 @@ export function InpaintingCanvas({
   imageUrl,
   imageWidth,
   imageHeight,
-  projectId,
-  assetId,
+  // projectId/assetId reserved for the eventual server-side material-apply
+  // call; kept on the public Props contract so the consumer doesn't break.
+  projectId: _projectId,
+  assetId: _assetId,
   onResult,
   onClose,
   className,
