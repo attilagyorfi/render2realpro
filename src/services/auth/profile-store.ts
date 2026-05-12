@@ -1,8 +1,23 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
-import crypto from "node:crypto";
+/**
+ * profile-store.ts
+ *
+ * Profile persistence has moved from a JSON file under
+ * `<storageRoot>/system/profiles.json` to the SQLite database (User table)
+ * so that ownership and project records share a single source of truth and
+ * benefit from foreign-key constraints.
+ *
+ * The pure helper functions at the top of this file (createProfileState,
+ * findProfileByEmail, assignProjectToProfileState, profileOwnsProjectState,
+ * normalizeProfileEmail) are retained so their unit tests still run and so
+ * any code that wants to reason about a state snapshot in memory still can.
+ *
+ * The public I/O surface (registerLocalProfile, loginLocalProfile,
+ * getProfileById, assignProjectToProfile, listProjectIdsForProfile,
+ * profileOwnsProject) is unchanged so existing route handlers don't need
+ * to migrate together with this module.
+ */
 
-import { appEnv } from "@/config/env";
+import { prisma } from "@/lib/prisma";
 
 export type LocalProfile = {
   id: string;
@@ -18,23 +33,16 @@ export type ProjectOwnership = {
   projectId: string;
 };
 
+/**
+ * In-memory snapshot of profiles + project ownership. Retained for the
+ * pure-function unit tests; not used by the application's hot path.
+ */
 export type ProfileStoreState = {
   profiles: LocalProfile[];
   projectOwnerships: ProjectOwnership[];
 };
 
-const DEFAULT_STATE: ProfileStoreState = {
-  profiles: [],
-  projectOwnerships: [],
-};
-
-function getProfileStorePath() {
-  return path.join(appEnv.storageRoot, "system", "profiles.json");
-}
-
-async function ensureProfileStoreRoot() {
-  await mkdir(path.dirname(getProfileStorePath()), { recursive: true });
-}
+// ─── Pure helpers (unit-testable, no I/O) ──────────────────────────────────
 
 export function createProfileState(
   overrides?: Partial<ProfileStoreState>
@@ -82,103 +90,113 @@ export function profileOwnsProjectState(
   );
 }
 
-export async function readProfileStoreState(): Promise<ProfileStoreState> {
-  await ensureProfileStoreRoot();
+// ─── DB-backed implementations ─────────────────────────────────────────────
 
-  try {
-    const raw = await readFile(getProfileStorePath(), "utf-8");
-    const parsed = JSON.parse(raw) as Partial<ProfileStoreState>;
+type UserRow = {
+  id: string;
+  email: string;
+  name: string;
+  createdAt: Date;
+  updatedAt: Date;
+  lastLoginAt: Date | null;
+};
 
-    return createProfileState({
-      profiles: Array.isArray(parsed.profiles) ? parsed.profiles : [],
-      projectOwnerships: Array.isArray(parsed.projectOwnerships)
-        ? parsed.projectOwnerships
-        : [],
-    });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      await writeProfileStoreState(DEFAULT_STATE);
-      return DEFAULT_STATE;
-    }
-
-    throw error;
-  }
+function userRowToProfile(row: UserRow): LocalProfile {
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    lastLoginAt: (row.lastLoginAt ?? row.updatedAt).toISOString(),
+  };
 }
 
-export async function writeProfileStoreState(state: ProfileStoreState) {
-  await ensureProfileStoreRoot();
-  await writeFile(getProfileStorePath(), JSON.stringify(state, null, 2), "utf-8");
-}
-
-export async function registerLocalProfile(input: { email: string; name: string }) {
-  const state = await readProfileStoreState();
-  const existing = findProfileByEmail(state, input.email);
+export async function registerLocalProfile(input: {
+  email: string;
+  name: string;
+}): Promise<LocalProfile> {
+  const email = normalizeProfileEmail(input.email);
+  const existing = await prisma.user.findUnique({ where: { email } });
 
   if (existing) {
     throw new Error("A profile already exists with this email.");
   }
 
-  const now = new Date().toISOString();
-  const profile: LocalProfile = {
-    id: crypto.randomUUID(),
-    email: normalizeProfileEmail(input.email),
-    name: input.name.trim(),
-    createdAt: now,
-    updatedAt: now,
-    lastLoginAt: now,
-  };
-
-  await writeProfileStoreState({
-    ...state,
-    profiles: [profile, ...state.profiles],
+  const now = new Date();
+  const created = await prisma.user.create({
+    data: {
+      email,
+      name: input.name.trim(),
+      lastLoginAt: now,
+    },
   });
 
-  return profile;
+  return userRowToProfile(created);
 }
 
-export async function loginLocalProfile(input: { email: string }) {
-  const state = await readProfileStoreState();
-  const existing = findProfileByEmail(state, input.email);
+export async function loginLocalProfile(input: {
+  email: string;
+}): Promise<LocalProfile> {
+  const email = normalizeProfileEmail(input.email);
+  const existing = await prisma.user.findUnique({ where: { email } });
 
   if (!existing) {
     throw new Error("No profile was found with this email.");
   }
 
-  const nextProfile = {
-    ...existing,
-    updatedAt: new Date().toISOString(),
-    lastLoginAt: new Date().toISOString(),
-  };
-
-  await writeProfileStoreState({
-    ...state,
-    profiles: state.profiles.map((profile) =>
-      profile.id === nextProfile.id ? nextProfile : profile
-    ),
+  const updated = await prisma.user.update({
+    where: { id: existing.id },
+    data: { lastLoginAt: new Date() },
   });
 
-  return nextProfile;
+  return userRowToProfile(updated);
 }
 
-export async function getProfileById(profileId: string) {
-  const state = await readProfileStoreState();
-  return state.profiles.find((profile) => profile.id === profileId);
+export async function getProfileById(
+  profileId: string
+): Promise<LocalProfile | undefined> {
+  const row = await prisma.user.findUnique({ where: { id: profileId } });
+  return row ? userRowToProfile(row) : undefined;
 }
 
-export async function assignProjectToProfile(input: ProjectOwnership) {
-  const state = await readProfileStoreState();
-  const nextState = assignProjectToProfileState(state, input);
-  await writeProfileStoreState(nextState);
+export async function assignProjectToProfile(
+  input: ProjectOwnership
+): Promise<void> {
+  // Verify both ends exist before linking so we surface a clear error rather
+  // than rely on a foreign-key violation deep inside Prisma.
+  const [user, project] = await Promise.all([
+    prisma.user.findUnique({ where: { id: input.profileId } }),
+    prisma.project.findUnique({ where: { id: input.projectId } }),
+  ]);
+
+  if (!user) throw new Error(`Profile not found: ${input.profileId}`);
+  if (!project) throw new Error(`Project not found: ${input.projectId}`);
+
+  await prisma.project.update({
+    where: { id: input.projectId },
+    data: { userId: input.profileId },
+  });
 }
 
-export async function listProjectIdsForProfile(profileId: string) {
-  const state = await readProfileStoreState();
-  return state.projectOwnerships
-    .filter((ownership) => ownership.profileId === profileId)
-    .map((ownership) => ownership.projectId);
+export async function listProjectIdsForProfile(
+  profileId: string
+): Promise<string[]> {
+  const projects = await prisma.project.findMany({
+    where: { userId: profileId },
+    select: { id: true },
+    orderBy: { createdAt: "desc" },
+  });
+  return projects.map((project) => project.id);
 }
 
-export async function profileOwnsProject(profileId: string, projectId: string) {
-  const state = await readProfileStoreState();
-  return profileOwnsProjectState(state, profileId, projectId);
+export async function profileOwnsProject(
+  profileId: string,
+  projectId: string
+): Promise<boolean> {
+  const match = await prisma.project.findFirst({
+    where: { id: projectId, userId: profileId },
+    select: { id: true },
+  });
+  return match !== null;
 }
