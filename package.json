@@ -15,7 +15,8 @@
     "test:watch": "vitest",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
-    "db:seed": "node prisma/seed.js"
+    "db:seed": "node prisma/seed.js",
+    "db:migrate-profiles": "node scripts/migrate-profiles-to-db.js"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
