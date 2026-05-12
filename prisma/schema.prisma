@@ -7,6 +7,21 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  // bcrypt hash; nullable for now so the JSON-profile migration can land
+  // without backfilling passwords. Sprint 2.3 will require it.
+  passwordHash String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  lastLoginAt  DateTime?
+  projects     Project[]
+
+  @@index([email])
+}
+
 model Project {
   id                String       @id @default(cuid())
   name              String
@@ -14,11 +29,16 @@ model Project {
   clientName        String?
   coverImageAssetId String?
   shareToken        String?      @unique
+  // Optional during the JSON→DB migration; Sprint 2.x will tighten to
+  // non-nullable once the data backfill has run on every environment.
+  userId            String?
+  user              User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
   imageAssets       ImageAsset[]
 
-  // Dashboard lists projects sorted by createdAt desc.
+  // Dashboard lists projects sorted by createdAt desc — per user.
+  @@index([userId, createdAt])
   @@index([createdAt])
 }
 
