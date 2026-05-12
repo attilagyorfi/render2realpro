@@ -8,15 +8,18 @@ datasource db {
 }
 
 model Project {
-  id               String       @id @default(cuid())
-  name             String
-  description      String?
-  clientName       String?
+  id                String       @id @default(cuid())
+  name              String
+  description       String?
+  clientName        String?
   coverImageAssetId String?
-  shareToken       String?      @unique
-  createdAt        DateTime     @default(now())
-  updatedAt        DateTime     @updatedAt
-  imageAssets      ImageAsset[]
+  shareToken        String?      @unique
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  imageAssets       ImageAsset[]
+
+  // Dashboard lists projects sorted by createdAt desc.
+  @@index([createdAt])
 }
 
 model ImageAsset {
@@ -35,19 +38,29 @@ model ImageAsset {
   project          Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
   imageVersions    ImageVersion[]
   generationLogs   GenerationLog[]
+
+  // Hot lookup: list/order assets within a project.
+  @@index([projectId, createdAt])
+  // Filter assets by status (e.g. find all currently processing).
+  @@index([status])
 }
 
 model ImageVersion {
-  id            String       @id @default(cuid())
-  imageAssetId  String
-  versionType   ImageVersionType
-  filePath      String
-  promptUsed    String?
-  presetUsed    String?
-  settingsJson  String
-  metadataJson  String?
-  createdAt     DateTime     @default(now())
-  imageAsset    ImageAsset    @relation(fields: [imageAssetId], references: [id], onDelete: Cascade)
+  id           String           @id @default(cuid())
+  imageAssetId String
+  versionType  ImageVersionType
+  filePath     String
+  promptUsed   String?
+  presetUsed   String?
+  settingsJson String
+  metadataJson String?
+  createdAt    DateTime         @default(now())
+  imageAsset   ImageAsset       @relation(fields: [imageAssetId], references: [id], onDelete: Cascade)
+
+  // Hot lookup: list versions for an asset, newest first.
+  @@index([imageAssetId, createdAt])
+  // Filter by version type within an asset (e.g. originals only).
+  @@index([imageAssetId, versionType])
 }
 
 model Preset {
@@ -57,6 +70,9 @@ model Preset {
   category     String
   settingsJson String
   createdAt    DateTime @default(now())
+
+  // Preset list filtered by category.
+  @@index([category])
 }
 
 model GenerationLog {
@@ -72,6 +88,11 @@ model GenerationLog {
   status         GenerationLogStatus @default(queued)
   createdAt      DateTime            @default(now())
   imageAsset     ImageAsset          @relation(fields: [imageAssetId], references: [id], onDelete: Cascade)
+
+  // History panel lists logs by asset and recency.
+  @@index([imageAssetId, createdAt])
+  // Surface the active queue across the dashboard.
+  @@index([status, createdAt])
 }
 
 enum ImageVersionType {
