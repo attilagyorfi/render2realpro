@@ -9,8 +9,12 @@
  */
 
 import path from "path";
-import { readFile } from "fs/promises";
-import { writeGeneratedVersionBuffer } from "@/services/storage/storage-service";
+
+import {
+  readStoredFile,
+  writeGeneratedVersionBuffer,
+} from "@/services/storage/storage-service";
+
 import type { ProviderAdapter, ProviderGenerateInput, ProviderGenerateResult } from "./provider-adapter";
 
 const API_BASE_URL = process.env.RENDER2REAL_API_URL ?? "http://localhost:8000";
@@ -23,8 +27,8 @@ export class FalAiProvider implements ProviderAdapter {
   readonly label = "Fal.ai Flux ControlNet (Architectural Fidelity)";
 
   async generateRealismPass(input: ProviderGenerateInput): Promise<ProviderGenerateResult> {
-    // ── Read source image ───────────────────────────────────────────────────
-    const imageBytes = await readFile(input.sourcePath);
+    // ── Read source image (path-traversal checked) ─────────────────────────
+    const imageBytes = await readStoredFile(input.sourcePath);
     const sourceExtension = path.extname(input.sourcePath).toLowerCase();
     const mimeType =
       sourceExtension === ".jpg" || sourceExtension === ".jpeg"
@@ -51,7 +55,9 @@ export class FalAiProvider implements ProviderAdapter {
     const formData = new FormData();
     formData.append(
       "image",
-      new File([imageBytes], path.basename(input.sourcePath), { type: mimeType })
+      new File([new Uint8Array(imageBytes)], path.basename(input.sourcePath), {
+        type: mimeType,
+      })
     );
     if (userPrompt) {
       formData.append("prompt", userPrompt);

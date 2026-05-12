@@ -1,8 +1,10 @@
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { appEnv } from "@/config/env";
-import { writeGeneratedVersionBuffer } from "@/services/storage/storage-service";
+import {
+  readStoredFile,
+  writeGeneratedVersionBuffer,
+} from "@/services/storage/storage-service";
 
 import type { ProviderAdapter, ProviderGenerateInput, ProviderGenerateResult } from "./provider-adapter";
 
@@ -31,7 +33,8 @@ export class OpenAiImageEditingProvider implements ProviderAdapter {
     }
 
     const startedAt = Date.now();
-    const imageBytes = await readFile(input.sourcePath);
+    // Path-traversal checked: only paths under appEnv.storageRoot succeed.
+    const imageBytes = await readStoredFile(input.sourcePath);
     const sourceExtension = path.extname(input.sourcePath).toLowerCase();
     const sourceType =
       sourceExtension === ".jpg" || sourceExtension === ".jpeg"
@@ -81,7 +84,12 @@ export class OpenAiImageEditingProvider implements ProviderAdapter {
     }
 
     formData.append("model", appEnv.openAiImageModel);
-    formData.append("image", new File([imageBytes], path.basename(input.sourcePath), { type: sourceType }));
+    formData.append(
+      "image",
+      new File([new Uint8Array(imageBytes)], path.basename(input.sourcePath), {
+        type: sourceType,
+      })
+    );
     formData.append("prompt", prompt);
     formData.append("size", outputSize);
     formData.append("quality", "medium");

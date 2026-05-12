@@ -1,9 +1,11 @@
 import crypto from "node:crypto";
-import { readFile } from "node:fs/promises";
 
 import sharp from "sharp";
 
-import { writeGeneratedVersionBuffer } from "@/services/storage/storage-service";
+import {
+  readStoredFile,
+  writeGeneratedVersionBuffer,
+} from "@/services/storage/storage-service";
 
 import type {
   ProviderAdapter,
@@ -67,7 +69,8 @@ export class MockLocalProvider implements ProviderAdapter {
     await sleep(600);
     await sleep(420);
 
-    const sourceBytes = await readFile(input.sourcePath);
+    // Path-traversal checked: only paths under appEnv.storageRoot succeed.
+    const sourceBytes = await readStoredFile(input.sourcePath);
     const meta = await sharp(sourceBytes).metadata();
     const width = meta.width ?? input.sourceWidth ?? 1024;
     const height = meta.height ?? input.sourceHeight ?? 768;
