@@ -23,19 +23,23 @@ model User {
 }
 
 model Project {
-  id                String       @id @default(cuid())
-  name              String
-  description       String?
-  clientName        String?
-  coverImageAssetId String?
-  shareToken        String?      @unique
+  id                  String       @id @default(cuid())
+  name                String
+  description         String?
+  clientName          String?
+  coverImageAssetId   String?
+  shareToken          String?      @unique
+  // Optional expiry; null means "never expires". Sprint 2.4 added.
+  shareTokenExpiresAt DateTime?
+  // Public-view counter; reset to 0 when the token is regenerated.
+  shareTokenViewCount Int          @default(0)
   // Optional during the JSON→DB migration; Sprint 2.x will tighten to
   // non-nullable once the data backfill has run on every environment.
-  userId            String?
-  user              User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
-  imageAssets       ImageAsset[]
+  userId              String?
+  user                User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  imageAssets         ImageAsset[]
 
   // Dashboard lists projects sorted by createdAt desc — per user.
   @@index([userId, createdAt])
