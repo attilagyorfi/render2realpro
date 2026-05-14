@@ -13,11 +13,49 @@
  *
  * The public I/O surface (registerLocalProfile, loginLocalProfile,
  * getProfileById, assignProjectToProfile, listProjectIdsForProfile,
- * profileOwnsProject) is unchanged so existing route handlers don't need
- * to migrate together with this module.
+ * profileOwnsProject) keeps its function names so existing route handlers
+ * don't need to migrate together with this module — but registerLocalProfile
+ * and loginLocalProfile now require a password argument (bcrypt-hashed at
+ * rest).
  */
 
+import bcrypt from "bcryptjs";
+
 import { prisma } from "@/lib/prisma";
+
+const BCRYPT_COST = 12;
+const MIN_PASSWORD_LENGTH = 8;
+
+/**
+ * Generic credential-failure error. Identical message for "user not found"
+ * and "wrong password" so the API doesn't leak whether an email is
+ * registered.
+ */
+export class InvalidCredentialsError extends Error {
+  constructor() {
+    super("Invalid email or password.");
+    this.name = "InvalidCredentialsError";
+  }
+}
+
+function assertPasswordPolicy(password: string): void {
+  if (typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH) {
+    throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+  }
+}
+
+export async function hashPassword(plain: string): Promise<string> {
+  assertPasswordPolicy(plain);
+  return bcrypt.hash(plain, BCRYPT_COST);
+}
+
+export async function verifyPassword(
+  plain: string,
+  hash: string
+): Promise<boolean> {
+  if (typeof plain !== "string" || typeof hash !== "string" || !hash) return false;
+  return bcrypt.compare(plain, hash);
+}
 
 export type LocalProfile = {
   id: string;
@@ -115,7 +153,9 @@ function userRowToProfile(row: UserRow): LocalProfile {
 export async function registerLocalProfile(input: {
   email: string;
   name: string;
+  password: string;
 }): Promise<LocalProfile> {
+  assertPasswordPolicy(input.password);
   const email = normalizeProfileEmail(input.email);
   const existing = await prisma.user.findUnique({ where: { email } });
 
@@ -123,11 +163,13 @@ export async function registerLocalProfile(input: {
     throw new Error("A profile already exists with this email.");
   }
 
+  const passwordHash = await hashPassword(input.password);
   const now = new Date();
   const created = await prisma.user.create({
     data: {
       email,
       name: input.name.trim(),
+      passwordHash,
       lastLoginAt: now,
     },
   });
@@ -135,19 +177,40 @@ export async function registerLocalProfile(input: {
   return userRowToProfile(created);
 }
 
+/**
+ * Sign in by email + password. Returns the profile on success, throws
+ * InvalidCredentialsError on either unknown email or wrong password.
+ *
+ * Users migrated from the legacy JSON profile store have passwordHash =
+ * null. We treat the *first* login as a password-setup step for that
+ * user: the supplied password is hashed and stored, then the user is
+ * signed in. Subsequent logins go through the usual compare path.
+ */
 export async function loginLocalProfile(input: {
   email: string;
+  password: string;
 }): Promise<LocalProfile> {
+  assertPasswordPolicy(input.password);
   const email = normalizeProfileEmail(input.email);
   const existing = await prisma.user.findUnique({ where: { email } });
 
   if (!existing) {
-    throw new Error("No profile was found with this email.");
+    throw new InvalidCredentialsError();
+  }
+
+  let passwordHash = existing.passwordHash;
+
+  if (passwordHash === null) {
+    // Legacy migration: set the password on first login.
+    passwordHash = await hashPassword(input.password);
+  } else {
+    const ok = await verifyPassword(input.password, passwordHash);
+    if (!ok) throw new InvalidCredentialsError();
   }
 
   const updated = await prisma.user.update({
     where: { id: existing.id },
-    data: { lastLoginAt: new Date() },
+    data: { passwordHash, lastLoginAt: new Date() },
   });
 
   return userRowToProfile(updated);

@@ -4,17 +4,30 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
 type AuthMode = "login" | "register";
 
+const MIN_PASSWORD_LENGTH = 8;
+
 export function AuthFormCard({ mode }: { mode: AuthMode }) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   const isRegister = mode === "register";
+
+  const passwordOk = password.length >= MIN_PASSWORD_LENGTH;
+  const formInvalid =
+    !email || !passwordOk || (isRegister && name.trim().length < 2);
 
   const submit = async () => {
     try {
@@ -24,13 +37,8 @@ export function AuthFormCard({ mode }: { mode: AuthMode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           isRegister
-            ? {
-                name,
-                email,
-              }
-            : {
-                email,
-              }
+            ? { name, email, password }
+            : { email, password }
         ),
       });
 
@@ -71,11 +79,29 @@ export function AuthFormCard({ mode }: { mode: AuthMode }) {
           onChange={(event) => setEmail(event.target.value)}
           placeholder="Email address"
           type="email"
+          autoComplete="email"
         />
+        <Input
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          placeholder={
+            isRegister
+              ? `Password (at least ${MIN_PASSWORD_LENGTH} characters)`
+              : "Password"
+          }
+          type="password"
+          autoComplete={isRegister ? "new-password" : "current-password"}
+          minLength={MIN_PASSWORD_LENGTH}
+        />
+        {isRegister && password.length > 0 && !passwordOk ? (
+          <p className="text-xs text-amber-300/80">
+            Password must be at least {MIN_PASSWORD_LENGTH} characters.
+          </p>
+        ) : null}
         <Button
           type="button"
           onClick={submit}
-          disabled={submitting || !email || (isRegister && name.trim().length < 2)}
+          disabled={submitting || formInvalid}
         >
           {isRegister ? "Create profile" : "Continue"}
         </Button>

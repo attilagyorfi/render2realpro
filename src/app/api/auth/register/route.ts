@@ -7,6 +7,7 @@ import { attachProfileSession } from "@/services/auth/session";
 const registerSchema = z.object({
   email: z.string().email(),
   name: z.string().min(2).max(120),
+  password: z.string().min(8, "Password must be at least 8 characters."),
 });
 
 export async function POST(request: Request) {
