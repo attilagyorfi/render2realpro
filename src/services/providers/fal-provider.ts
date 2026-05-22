@@ -38,9 +38,20 @@ import type {
 } from "./provider-adapter";
 
 const DEFAULT_MODEL = process.env.FAL_MODEL ?? "fal-ai/flux-pro/v1/canny";
-const DEFAULT_CONTROL_WEIGHT = Number(process.env.FAL_CONTROL_WEIGHT ?? "0.75");
-const DEFAULT_INFERENCE_STEPS = Number(process.env.FAL_INFERENCE_STEPS ?? "28");
-const DEFAULT_GUIDANCE_SCALE = Number(process.env.FAL_GUIDANCE_SCALE ?? "3.5");
+// Lower conditioning_scale leaves more room for photorealistic texture and
+// lighting; 0.75 was reproducing the source's flat-shaded look. 0.5 is the
+// architectural sweet spot — strong enough to preserve geometry, loose
+// enough to let the model invent realistic materials.
+const DEFAULT_CONTROL_WEIGHT = Number(process.env.FAL_CONTROL_WEIGHT ?? "0.5");
+// More inference steps trade a few seconds of latency for visibly sharper
+// materials and lighting; 40 is the practical ceiling before diminishing
+// returns on Flux Pro v1.
+const DEFAULT_INFERENCE_STEPS = Number(process.env.FAL_INFERENCE_STEPS ?? "40");
+// Higher guidance pushes the model harder toward the prompt's photographic
+// language. 3.5 was too permissive — outputs stayed close to the input
+// render's washed-out look. 7 is the standard "follow the prompt firmly"
+// value for Flux without going into oversaturation territory.
+const DEFAULT_GUIDANCE_SCALE = Number(process.env.FAL_GUIDANCE_SCALE ?? "7");
 
 let configured = false;
 
@@ -111,9 +122,18 @@ export class FalAiProvider implements ProviderAdapter {
     );
     const sourceUrl = await fal.storage.upload(sourceFile);
 
-    // ── 3. Build prompt: preservation contract baked into plain English ────
+    // ── 3. Build prompt ────────────────────────────────────────────────────
+    // Flux responds far better to descriptive *photographic* language than
+    // to engineering checklists. The previous prompt was a list of
+    // preservation rules; the model interpreted that as "stay as close to
+    // the input as possible" and never invented any real material or light.
+    // We now lead with photography vocabulary, name concrete materials,
+    // and describe the lighting before we mention any preservation rule.
     const promptParts: string[] = [
-      "Photorealistic architectural rendering, ultra-high quality, professional architectural photography.",
+      "RAW photo, professional architectural photography, ultra-realistic, photorealistic, shot on a Hasselblad H6D medium format camera, 50mm prime lens, sharp focus, natural daylight.",
+      "High-end architecture magazine photography style: rich material detail, true-to-life textures, subtle surface imperfections, soft directional shadows, ambient occlusion in corners, light bouncing off polished surfaces.",
+      "Materials should look real: brushed concrete with fine aggregate, polished limestone or terrazzo floor with soft specular reflections, oak or walnut wood with visible grain, brushed aluminium or anodised metal trims, clear architectural glass with subtle reflections and slight tinting, white painted plaster walls with minimal texture.",
+      "Lighting: warm natural daylight streaming through windows, soft volumetric light, gentle contact shadows under objects, golden-hour ambient tones.",
     ];
     if (input.prompt.presetName && input.prompt.presetName !== "custom") {
       promptParts.push(`Style preset: ${input.prompt.presetName}.`);
@@ -121,13 +141,13 @@ export class FalAiProvider implements ProviderAdapter {
     if (input.prompt.customDirectives?.length) {
       promptParts.push(...input.prompt.customDirectives);
     }
+    // Preservation contract goes LAST — Flux weighs the front of the prompt
+    // more heavily, so the photo-style language dominates while these
+    // constraints still ride along.
     promptParts.push(
+      "Strictly preserve the original camera angle, perspective, framing, and field of view.",
       "Preserve every architectural element exactly: building footprint, facade geometry, window positions, column spacing, roof shape, and all structural details.",
-      "Preserve camera angle, perspective, framing, focal length, and field of view.",
-      "Replace flat / clay-shaded materials with photorealistic textures: concrete, glass, metal, brick, wood, asphalt.",
-      "Improve lighting realism (subsurface scattering on glass, ambient occlusion, contact shadows, soft natural light) without changing the lighting direction.",
-      "Add subtle, believable weathering where surfaces already imply wear.",
-      "No redesign. No extra people. No extra buildings. No composition changes."
+      "No redesign, no extra people, no extra buildings, no composition changes, no cartoon style, no illustration look, no flat shading, no 3D-render look."
     );
     const prompt = promptParts.join(" ");
 
