@@ -7,15 +7,14 @@ type ProviderEnvOverride = {
   openAiImageModel?: string;
 };
 
-const RENDER2REAL_API_URL = process.env.RENDER2REAL_API_URL ?? "http://localhost:8000";
+const FAL_MODEL = process.env.FAL_MODEL ?? "fal-ai/flux-pro/v1/canny";
 
 /**
- * Check if the render2real FastAPI microservice is reachable.
- * This is a synchronous check based on env vars only (no network call at registry time).
+ * The Fal provider now talks to Fal.ai directly via @fal-ai/client, so the
+ * only thing that decides "is it ready" is whether we have a FAL_KEY.
+ * No external Python microservice is involved any more.
  */
 function isFalConfigured(): boolean {
-  // The FAL_KEY is used by the Python microservice, not directly here.
-  // We consider it "configured" if the API URL is set and FAL_KEY env var is present.
   return Boolean(process.env.FAL_KEY);
 }
 
@@ -48,9 +47,9 @@ export function getProviderStatusSnapshot(
         configured: falConfigured,
         supportsRealtimeProgress: false,
         requiresApiKey: true,
-        model: "fal-ai/flux-pro/v1/canny",
+        model: FAL_MODEL,
         statusMessage: falConfigured
-          ? `Ready. API: ${RENDER2REAL_API_URL}`
+          ? `Ready. Direct Fal.ai integration, model: ${FAL_MODEL}.`
           : "Missing FAL_KEY. Set FAL_KEY environment variable to enable this provider.",
       },
       {
