@@ -642,7 +642,13 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
 
   const generateMutation = useMutation({
     mutationFn: (providerOverride?: string) =>
-      fetchJson<{ generation: { generationLogId: string } }>("/api/generations", {
+      fetchJson<{
+        generation: {
+          generationLogId: string;
+          imageVersionId: string;
+          fidelity?: FidelityScore | null;
+        };
+      }>("/api/generations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -670,12 +676,20 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
         upsertQueueEntry({ id: selectedAsset.id, label: selectedAsset.originalFileName, progress: 100, status: "completed", message: t("workspace.generationSaved", language) });
       }
       toast.success(t("workspace.generationCompleted", language));
+      // Point the workspace at the freshly generated version so the
+      // before/after comparison shows the new output instead of the
+      // previously selected (often the original) version.
+      const newVersionId = data?.generation?.imageVersionId;
+      if (selectedAsset && newVersionId) {
+        setSelectedAsset(selectedAsset.id, newVersionId);
+      }
       // Delay comparison enable slightly to avoid flash/glitch during data refresh
       setTimeout(() => setCompareEnabled(true), 300);
       queryClient.invalidateQueries({ queryKey: ["project", projectId] });
       // Extract fidelity score if Fal.ai provider was used
-      const fidelity = (data as { generation?: { fidelity?: FidelityScore } })?.generation?.fidelity;
-      if (fidelity) setLastFidelityScore(fidelity);
+      if (data?.generation?.fidelity) {
+        setLastFidelityScore(data.generation.fidelity);
+      }
     },
     onError: (error) => {
       if (error instanceof ApiError) {
