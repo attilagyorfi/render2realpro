@@ -40,14 +40,17 @@ export const appEnv = {
   databaseUrl: process.env.DATABASE_URL ?? "file:./dev.db",
   storageRoot: configuredStorageRoot,
   activeProvider: process.env.RENDER2REAL_ACTIVE_PROVIDER ?? "mock-local",
-  // RENDER2REAL_PROVIDER_API_KEY takes priority so the system-level OPENAI_API_KEY
-  // (which may be a Manus proxy key) does not override the project's own key.
+  // RENDER2REAL_PROVIDER_API_KEY takes priority over OPENAI_API_KEY so that
+  // a system-level OpenAI key set elsewhere on the machine cannot
+  // accidentally hijack this project's intended key.
   providerApiKey:
     process.env.RENDER2REAL_PROVIDER_API_KEY ?? process.env.OPENAI_API_KEY ?? "",
   openAiImageModel: process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1",
-  // render2real-api FastAPI microservice URL
+  // Optional URL of the legacy render2real-api FastAPI service. Only the
+  // texture-targeting inpainting feature still references it; the main
+  // realism-pass pipeline now talks to Fal.ai directly via @fal-ai/client.
   render2realApiUrl: process.env.RENDER2REAL_API_URL ?? "http://localhost:8000",
-  // Fal.ai key (used by the Python microservice; exposed here for status checks)
+  // Fal.ai API key, consumed directly by fal-provider.ts.
   falKey: process.env.FAL_KEY ?? "",
   // HMAC secret for signed session cookies; lazy so a misconfigured prod
   // build fails on the first cookie verify rather than on module load.
