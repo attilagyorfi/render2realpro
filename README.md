@@ -1,6 +1,6 @@
 # Render2Real Pro
 
-Render2Real Pro is a local-first architectural image workflow for **M Merneki Iroda Kft.** It helps architects, engineers, and visualization specialists upload architectural renders and run a realism-enhancement workflow that preserves the original composition exactly.
+Render2Real Pro is an architectural image workflow for **M Mérnöki Iroda Kft.** It helps architects, engineers, and visualization specialists upload architectural renders and run a realism-enhancement workflow that preserves the original composition exactly.
 
 ## Core rule
 
@@ -16,124 +16,168 @@ The app is structured so prompt generation, presets, provider boundaries, and UI
 - exact roads, rails, vegetation, loading docks, and vehicles
 - exact scene layout
 
-## What phase 1 includes
+## What's in the box
 
-- Next.js 16 + TypeScript application shell
-- Prisma + SQLite local metadata storage
+- Next.js 16 + TypeScript application shell with React 19 and Turbopack
+- Prisma + PostgreSQL metadata storage (SQLite no longer supported)
 - Local filesystem asset storage with API-backed file serving
 - Project creation and dashboard
 - Multi-file render upload with validation
 - Main workspace with:
-  - left asset/version rail
+  - left asset/version rail (drag-to-reorder)
   - center preview/crop/compare canvas
   - right preset/prompt/settings panel
   - bottom queue/progress strip
 - 10 default realism presets
 - Modular prompt engine with immutable preservation rules
-- Mock provider pipeline that duplicates the source image as the processed output
+- Three AI provider adapters behind a single interface:
+  - **mock-local** — sharp-based deterministic pipeline (contrast, saturation, sharpen, vignette) for local UI demos without an AI key
+  - **fal-controlnet** — direct Fal.ai Flux ControlNet Canny integration (recommended)
+  - **openai-image-editing** — legacy OpenAI gpt-image-1 (not recommended for architectural fidelity)
+- Per-user accounts with bcrypt-hashed passwords and HMAC-signed session cookies
+- Public share links with optional expiry and view counter
 - Before/after comparison modes
 - PNG/JPG/WEBP export endpoint
 - Provider management, settings, and history pages
 
 ## Tech stack
 
-- Next.js 16
-- TypeScript
-- Tailwind CSS
-- shadcn/ui
-- Zustand
-- React Query
-- Framer Motion
-- Prisma ORM
-- SQLite
-- Zod
-- React Hook Form
-- react-dropzone
-- react-easy-crop
+- Next.js 16, React 19, TypeScript
+- Tailwind CSS, shadcn/ui, Radix, Framer Motion
+- Zustand, React Query, React Hook Form, Zod
+- Prisma ORM + PostgreSQL
+- sharp for local image processing
+- @fal-ai/client for the primary AI provider
+- bcryptjs for password hashing
+- Vitest for unit tests
+- GitHub Actions for CI (lint + typecheck + test on every push)
 
 ## Local setup
 
-1. Install dependencies
+### Prerequisites
 
-```bash
-npm install
-```
+- [Node.js 22+](https://nodejs.org)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (for the local Postgres)
+- [Git](https://git-scm.com)
 
-2. Confirm local environment values
+### Steps
 
-The repository includes `.env.example` and a local development `.env` with:
+1. **Clone and install dependencies**
 
-```env
-DATABASE_URL="file:./dev.db"
-RENDER2REAL_STORAGE_ROOT="./storage"
-RENDER2REAL_ACTIVE_PROVIDER="mock-local"
-RENDER2REAL_PROVIDER_API_KEY=""
-```
+   ```bash
+   git clone https://github.com/attilagyorfi/render2realpro
+   cd render2realpro
+   npm install
+   ```
 
-3. Generate Prisma client
+2. **Start Postgres locally via Docker**
 
-```bash
-npm run db:generate
-```
+   ```bash
+   docker compose up -d
+   ```
 
-4. Push the SQLite schema
+   This boots `postgres:16-alpine` on `localhost:5432` with the credentials
+   that `.env.example` expects. The data lives in the `render2real_pgdata`
+   named volume and survives `docker compose down`. To wipe everything:
+   `docker compose down -v`.
 
-```bash
-npm run db:push
-```
+3. **Create your local `.env`**
 
-5. Seed the default presets
+   ```bash
+   # Windows CMD
+   copy .env.example .env
 
-```bash
-npm run db:seed
-```
+   # macOS / Linux
+   cp .env.example .env
+   ```
 
-6. Start development
+   Edit `.env` and set at minimum:
+   - `RENDER2REAL_SESSION_SECRET` — generate one with
+     `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`
+   - `FAL_KEY` and `RENDER2REAL_ACTIVE_PROVIDER="fal-controlnet"` if you
+     want real AI generation. Otherwise leave the active provider on
+     `mock-local`.
 
-```bash
-npm run dev
-```
+4. **Generate the Prisma client and push the schema**
 
-`npm run dev` uses Turbopack (the Next.js 16 default). If you hit a stale dev cache after editing component state (e.g. a `ReferenceError` for a freshly added `useState` variable), clear `.next` and restart:
+   ```bash
+   npm run db:generate
+   npm run db:push
+   ```
 
-```bash
-npm run dev:clean
-```
+5. **Seed the default presets**
 
-A webpack-based fallback is still available if Turbopack misbehaves on your environment:
+   ```bash
+   npm run db:seed
+   ```
 
-```bash
-npm run dev:webpack
-```
+6. **Start the dev server**
 
-7. Open the app
+   ```bash
+   npm run dev
+   ```
 
-Visit [http://localhost:3000](http://localhost:3000)
+   `npm run dev` uses Turbopack (the Next.js 16 default). If you hit a
+   stale dev cache after editing a `useState` (e.g. a `ReferenceError`
+   for a freshly added variable), clear `.next` and restart:
+
+   ```bash
+   npm run dev:clean
+   ```
+
+   A webpack-based fallback is still available if Turbopack misbehaves
+   on your environment:
+
+   ```bash
+   npm run dev:webpack
+   ```
+
+7. **Open the app**
+
+   Visit [http://localhost:3000](http://localhost:3000), register a
+   profile, then start a new project from `/app`.
+
+### Migrating from an old SQLite dev.db
+
+If you previously ran an older revision of this project on SQLite, the
+data does not port over to Postgres automatically — you'll need to
+register a fresh profile and recreate projects. The legacy
+`prisma/dev.db` file is no longer used and can be deleted.
+
+If you happened to register profiles in the legacy JSON profile store
+(`storage/system/profiles.json`), the
+`npm run db:migrate-profiles` script will lift those into the new User
+table after the schema is in place.
+
+## Production deployment
+
+See [`DEPLOY.md`](./DEPLOY.md) for a step-by-step Railway deploy guide
+(Postgres add-on, persistent volume for storage, env-var checklist,
+custom-domain hookup, rollback procedure).
 
 ## Key routes
 
-- `/` dashboard and project creation
-- `/projects/[projectId]` main workspace
-- `/providers` provider management
-- `/history` generation log history
-- `/settings` local environment guidance
+- `/` landing page
+- `/login`, `/register` profile auth
+- `/app` dashboard and project list
+- `/app/projects/[projectId]` main workspace
+- `/app/providers` provider management
+- `/app/history` generation log history
+- `/app/settings` local environment guidance
+- `/share/[token]` public share view (read-only, no auth)
+- `/api/health` liveness probe (200 OK + version)
 
 ## Storage model
 
-- SQLite stores metadata for projects, assets, versions, presets, and logs.
-- Binary files are stored on the local filesystem under `RENDER2REAL_STORAGE_ROOT`.
-- Files are served through `/api/files/...` so the UI is not coupled directly to disk paths.
+- PostgreSQL stores metadata for users, projects, assets, versions, presets, and logs.
+- Binary files (uploads, previews, generated versions) are stored under `RENDER2REAL_STORAGE_ROOT` on the local filesystem (or a mounted persistent volume in production).
+- Files are served through `/api/files/...` so the UI is not coupled directly to disk paths, and the route enforces a path-traversal check against the storage root.
 
-## Mock provider behavior
+## Provider behaviour
 
-Phase 1 uses a mock provider instead of a real AI image-editing backend. The mock service:
-
-- simulates processing delay
-- records provider metadata
-- creates generation logs
-- duplicates the uploaded source image into a new generated version
-
-This keeps the workflow and architecture production-ready without requiring a live external provider.
+- **mock-local** runs a deterministic sharp pipeline (mild contrast + saturation + sharpen + radial vignette) on the source image so the workspace can be demoed end-to-end without an AI key. Output is visibly different from the input but composition-preserving.
+- **fal-controlnet** uploads the source to Fal storage, runs Flux ControlNet Canny server-side (with a tunable conditioning scale, defaults to architectural-fidelity settings), and stores the returned image locally. All tunables (`FAL_MODEL`, `FAL_CONTROL_WEIGHT`, `FAL_INFERENCE_STEPS`, `FAL_GUIDANCE_SCALE`) are overridable in `.env`.
+- **openai-image-editing** is a legacy path kept for fallback; not recommended for architectural fidelity because OpenAI's image-edit endpoint has no ControlNet equivalent.
 
 ## Available presets
 
@@ -148,19 +192,36 @@ This keeps the workflow and architecture production-ready without requiring a li
 9. Industrial Weathered Materials
 10. Minimal Clean Marketing Style
 
-## Known phase-1 limitations
+## Scripts
 
-- Authentication is a placeholder only.
-- Local masking tools and semantic quick-selection tools are deferred.
-- The mock provider does not visually modify the image yet.
-- Export currently triggers a generated download from the selected version rather than writing an export manifest back into the project database.
+| Script | What it does |
+|---|---|
+| `npm run dev` | Turbopack dev server on http://localhost:3000 |
+| `npm run dev:clean` | Clear `.next` cache then start dev |
+| `npm run dev:webpack` | Fallback webpack dev server |
+| `npm run clean` | Remove `.next` only |
+| `npm run build` | Production Next.js build |
+| `npm start` | Run the production build |
+| `npm run lint` | ESLint |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run test` | Vitest with coverage |
+| `npm run test:watch` | Vitest watch mode |
+| `npm run db:generate` | Regenerate the Prisma client |
+| `npm run db:push` | Sync the schema to the DB without a migration file |
+| `npm run db:seed` | Insert the 10 default presets |
+| `npm run db:migrate-profiles` | One-shot import of legacy JSON profiles into the User table |
+
+## Known limitations
+
+- Texture-targeting / inpainting feature still uses the legacy `RENDER2REAL_API_URL` Python service path; the main realism pass no longer does. Porting texture-targeting to direct Fal is a future sprint.
+- No job queue yet — concurrent generation requests against the same asset can race.
+- No orphan-cleanup for generation logs whose generation failed mid-flight.
+- Export does not yet write a manifest back into the project database.
 
 ## Future-ready seams
 
-The codebase is already split so later work can extend it cleanly:
-
-- `src/services/providers` for real AI integrations
-- `src/services/storage` for cloud or desktop-backed storage
+- `src/services/providers` for additional AI integrations
+- `src/services/storage` for cloud-backed storage (S3 / R2 / Vercel Blob)
 - `src/services/export` for richer export presets
 - `src/store` and workspace editor state for mask/local-edit tools
-- Tauri packaging in a later phase without rewriting the app domain logic
+- Tauri packaging for a desktop distribution later, without rewriting the app domain logic
