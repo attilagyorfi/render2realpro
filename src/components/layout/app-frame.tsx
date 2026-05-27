@@ -5,6 +5,7 @@ import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import {
   FolderKanban,
+  Home,
   Languages,
   LayoutGrid,
   Settings2,
@@ -105,28 +106,47 @@ export function AppFrame({
           </div>
           <div className="flex items-center gap-2">
             <nav className="hidden items-center gap-2 md:flex">
-              {navigationItems.map((item) => {
-                const Icon = item.icon;
-                const isActive =
-                  pathname === item.href || pathname.startsWith(`${item.href}/`);
+              {/* Home is always visible so the user can leave the app shell. */}
+              <Link
+                href="/"
+                className={buttonVariants({
+                  variant: "ghost",
+                  size: "sm",
+                  className: "text-muted-foreground",
+                })}
+              >
+                <Home data-icon="inline-start" />
+                {t("common.home", language)}
+              </Link>
 
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={buttonVariants({
-                      variant: isActive ? "secondary" : "ghost",
-                      size: "sm",
-                      className: isActive
-                        ? "surface-chip text-foreground shadow-sm"
-                        : "text-muted-foreground",
-                    })}
-                  >
-                    <Icon data-icon="inline-start" />
-                    {t(item.labelKey, language)}
-                  </Link>
-                );
-              })}
+              {/* App-internal navigation only when the visitor is actually
+                  signed in. Showing Dashboard/Projects/Settings/Admin to a
+                  signed-out visitor is misleading — they can't reach any of
+                  them anyway, and it clutters the auth-guard screen. */}
+              {isAppRoute && session?.profile
+                ? navigationItems.map((item) => {
+                    const Icon = item.icon;
+                    const isActive =
+                      pathname === item.href || pathname.startsWith(`${item.href}/`);
+
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className={buttonVariants({
+                          variant: isActive ? "secondary" : "ghost",
+                          size: "sm",
+                          className: isActive
+                            ? "surface-chip text-foreground shadow-sm"
+                            : "text-muted-foreground",
+                        })}
+                      >
+                        <Icon data-icon="inline-start" />
+                        {t(item.labelKey, language)}
+                      </Link>
+                    );
+                  })
+                : null}
             </nav>
 
             {isAppRoute && session?.profile ? (
