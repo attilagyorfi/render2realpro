@@ -12,9 +12,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  lint-typecheck-test:
-    name: Lint, typecheck, test
+  lint-typecheck-test-build:
+    name: Lint, typecheck, test, build
     runs-on: ubuntu-latest
+
+    # Dummy production-shaped env-vars so `next build` can compile without
+    # contacting a real database. None of these reach a network — Prisma
+    # only reads DATABASE_URL at query time, and the session secret is
+    # only consumed by cookie sign/verify at request time.
+    env:
+      DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+      RENDER2REAL_SESSION_SECRET: ci-build-deterministic-secret-32-chars-min-aa
+      RENDER2REAL_STORAGE_ROOT: ./storage
 
     steps:
       - name: Checkout
@@ -43,3 +52,9 @@ jobs:
 
       - name: Test
         run: npx vitest run
+
+      # Catches the "compiles locally but breaks in production build" class
+      # of bug (the storage-subsystem regression that hit Sprint 1 would
+      # have been caught here if this step had existed).
+      - name: Production build
+        run: npm run build
