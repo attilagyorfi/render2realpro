@@ -1,0 +1,35 @@
+# Local development stack for Render2Real Pro.
+#
+# Starts a single Postgres 16 instance on port 5432, with a named volume
+# so data persists across `docker compose down`. Production uses Railway
+# Postgres (or any other managed Postgres) — this file is for local dev
+# only.
+#
+# Usage:
+#   docker compose up -d     # start postgres in the background
+#   docker compose logs -f   # tail the logs
+#   docker compose down      # stop (data preserved in the volume)
+#   docker compose down -v   # stop AND wipe the volume (factory reset)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: render2real-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: render2real
+      POSTGRES_PASSWORD: render2real_dev
+      POSTGRES_DB: render2real_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - render2real_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U render2real -d render2real_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  render2real_pgdata:
+    name: render2real_pgdata
