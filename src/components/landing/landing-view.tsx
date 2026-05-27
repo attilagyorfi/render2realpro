@@ -890,8 +890,12 @@ export function LandingView() {
                     ))}
                   </div>
                   <div className="mt-8">
+                    {/* All three CTAs go to /register for now — Studio and
+                        Enterprise eventually need a sales contact form, but
+                        sending people to /preview or /login was actively
+                        wrong (it made the buttons feel broken). */}
                     <Link
-                      href={plan.name === "Starter" ? "/register" : plan.name === "Studio" ? "/preview" : "/login"}
+                      href="/register"
                       className={buttonVariants({
                         variant: plan.highlighted ? "default" : "outline",
                         size: "lg",
