@@ -27,10 +27,9 @@ export async function POST(request: Request) {
       );
     }
 
+    console.error("[texture-targeting/preview]", error);
     return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : "Unable to create texture preview.",
-      },
+      { error: "Unable to create texture preview." },
       { status: 500 }
     );
   }

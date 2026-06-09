@@ -27,10 +27,9 @@ export async function POST(request: Request) {
       );
     }
 
+    console.error("[texture-targeting/apply]", error);
     return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : "Unable to apply texture pass.",
-      },
+      { error: "Unable to apply texture pass." },
       { status: 500 }
     );
   }

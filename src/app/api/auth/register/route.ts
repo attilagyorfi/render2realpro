@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { registerLocalProfile } from "@/services/auth/profile-store";
+import {
+  EmailAlreadyTakenError,
+  registerLocalProfile,
+} from "@/services/auth/profile-store";
 import { attachProfileSession } from "@/services/auth/session";
 
 const registerSchema = z.object({
@@ -24,9 +27,18 @@ export async function POST(request: Request) {
       );
     }
 
+    if (error instanceof EmailAlreadyTakenError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+
+    // Anything else — DB connection failure, Prisma errors, unexpected
+    // exceptions — must not leak its message to the client (see audit
+    // 8.2.1: raw stack traces, file paths, and Prisma internals were
+    // appearing in the error toast). Log server-side, return generic.
+    console.error("[auth/register]", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Registration failed." },
-      { status: 400 }
+      { error: "Registration is temporarily unavailable. Please try again." },
+      { status: 500 }
     );
   }
 }

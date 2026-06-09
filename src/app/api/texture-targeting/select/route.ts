@@ -29,11 +29,9 @@ export async function POST(request: Request) {
       );
     }
 
+    console.error("[texture-targeting/select]", error);
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Unable to create selection preview.",
-      },
+      { error: "Unable to create selection preview." },
       { status: 500 }
     );
   }

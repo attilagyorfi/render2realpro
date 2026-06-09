@@ -33,9 +33,12 @@ export async function POST(request: Request) {
       );
     }
 
+    // Log unexpected errors server-side; return generic to the client
+    // so DB internals / stack traces don't leak (see audit 8.2.1).
+    console.error("[auth/login]", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Login failed." },
-      { status: 400 }
+      { error: "Sign-in is temporarily unavailable. Please try again." },
+      { status: 500 }
     );
   }
 }
