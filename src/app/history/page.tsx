@@ -1,5 +1,10 @@
-import { HistoryView } from "@/components/history/history-view";
+import { redirect } from "next/navigation";
 
-export default function HistoryPage() {
-  return <HistoryView />;
+/**
+ * Legacy root-level route. The canonical location is /app/history.
+ * Kept here only as a permanent redirect so old bookmarks / docs links
+ * still work.
+ */
+export default function LegacyHistoryPage() {
+  redirect("/app/history");
 }
