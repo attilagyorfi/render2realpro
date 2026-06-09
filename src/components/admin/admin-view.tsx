@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
-import { Edit2, Plus, Save, Trash2, X } from "lucide-react";
+import { Check, Edit2, Plus, Save, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
 type PresetSettings = {
@@ -50,6 +50,171 @@ function fetchJson<T = unknown>(url: string, options?: RequestInit): Promise<T> 
     if (!r.ok) return r.json().then((b) => Promise.reject(new Error(b.error ?? "Request failed")));
     return r.json() as Promise<T>;
   });
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Pending registrations panel — Sprint E.6 / Munkacsomag 2.
+// ───────────────────────────────────────────────────────────────────────────
+
+type PendingRegistration = {
+  id: string;
+  email: string;
+  name: string;
+  createdAt: string;
+};
+
+function PendingRegistrationsCard() {
+  const queryClient = useQueryClient();
+  const [resolving, setResolving] = useState<{
+    id: string;
+    name: string;
+    email: string;
+    action: "approve" | "reject";
+  } | null>(null);
+
+  const { data, isLoading } = useQuery<{ registrations: PendingRegistration[] }>({
+    queryKey: ["admin-registrations"],
+    queryFn: () => fetchJson("/api/admin/registrations"),
+  });
+
+  const approve = useMutation({
+    mutationFn: (id: string) =>
+      fetchJson(`/api/admin/registrations/by-id/${id}/approve`, { method: "POST" }),
+    onSuccess: () => {
+      toast.success("Regisztráció jóváhagyva");
+      queryClient.invalidateQueries({ queryKey: ["admin-registrations"] });
+    },
+    onError: (err) =>
+      toast.error(err instanceof Error ? err.message : "Jóváhagyás sikertelen"),
+  });
+
+  const reject = useMutation({
+    mutationFn: (id: string) =>
+      fetchJson(`/api/admin/registrations/by-id/${id}/reject`, { method: "POST" }),
+    onSuccess: () => {
+      toast.success("Regisztráció elutasítva");
+      queryClient.invalidateQueries({ queryKey: ["admin-registrations"] });
+    },
+    onError: (err) =>
+      toast.error(err instanceof Error ? err.message : "Elutasítás sikertelen"),
+  });
+
+  const registrations = data?.registrations ?? [];
+
+  return (
+    <>
+      <Card className="border-white/10 bg-white/5 backdrop-blur-xl">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Függőben lévő regisztrációk</CardTitle>
+              <CardDescription>
+                Új jelentkezések — jóváhagyás vagy elutasítás.
+              </CardDescription>
+            </div>
+            {registrations.length > 0 ? (
+              <Badge className="border-amber-500/30 bg-amber-500/15 text-amber-200">
+                {registrations.length}
+              </Badge>
+            ) : null}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="text-sm text-zinc-500">Betöltés...</div>
+          ) : registrations.length === 0 ? (
+            <div className="text-sm text-zinc-500">
+              Jelenleg nincs függőben lévő regisztráció.
+            </div>
+          ) : (
+            <ul className="grid gap-2">
+              {registrations.map((r) => (
+                <li
+                  key={r.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/8 bg-white/4 px-4 py-3"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium text-foreground">{r.name}</div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {r.email} ·{" "}
+                      {new Date(r.createdAt).toLocaleString("hu-HU", {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      })}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Button
+                      size="sm"
+                      className="bg-emerald-600 text-white hover:bg-emerald-500"
+                      onClick={() =>
+                        setResolving({ id: r.id, name: r.name, email: r.email, action: "approve" })
+                      }
+                    >
+                      <Check className="size-3.5 mr-1.5" />
+                      Jóváhagyom
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="border-rose-500/40 text-rose-300 hover:bg-rose-500/10"
+                      onClick={() =>
+                        setResolving({ id: r.id, name: r.name, email: r.email, action: "reject" })
+                      }
+                    >
+                      <X className="size-3.5 mr-1.5" />
+                      Elutasítom
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Confirmation overlay — uses the existing dark overlay style of
+          the rest of the admin/workspace modals; intentionally not the
+          native confirm() (audit 3.5). */}
+      {resolving ? (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#0d1117] p-6 shadow-2xl">
+            <h3 className="text-lg font-semibold text-foreground">
+              {resolving.action === "approve"
+                ? "Regisztráció jóváhagyása"
+                : "Regisztráció elutasítása"}
+            </h3>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {resolving.action === "approve"
+                ? `${resolving.name} (${resolving.email}) fiókját jóváhagyod, és a jelentkező visszaigazoló e-mailt kap.`
+                : `${resolving.name} (${resolving.email}) jelentkezését elutasítod. A felhasználó nem kap automatikus értesítést.`}
+            </p>
+            <div className="mt-6 flex items-center justify-end gap-2">
+              <Button variant="outline" onClick={() => setResolving(null)}>
+                Mégse
+              </Button>
+              <Button
+                className={
+                  resolving.action === "approve"
+                    ? "bg-emerald-600 text-white hover:bg-emerald-500"
+                    : "bg-rose-600 text-white hover:bg-rose-500"
+                }
+                disabled={approve.isPending || reject.isPending}
+                onClick={() => {
+                  const id = resolving.id;
+                  if (resolving.action === "approve") approve.mutate(id);
+                  else reject.mutate(id);
+                  setResolving(null);
+                }}
+              >
+                {resolving.action === "approve" ? "Jóváhagyom" : "Elutasítom"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 function PresetEditor({
@@ -233,6 +398,8 @@ export function AdminView() {
   return (
     <AppFrame eyebrow="Platform administration" title="Admin">
       <div className="space-y-6">
+        <PendingRegistrationsCard />
+
         {/* Preset Editor Section */}
         <Card className="border-white/10 bg-white/5 backdrop-blur-xl">
           <CardHeader>
