@@ -72,6 +72,10 @@ export function AuthFormCard({ mode }: { mode: AuthMode }) {
   const [password, setPassword] = useState("");
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // After a successful registration, the API returns { pending: true }
+  // and we swap the form for an "awaiting approval" panel rather than
+  // bouncing the user to /app (where the guard would block them anyway).
+  const [pendingDone, setPendingDone] = useState(false);
 
   const isRegister = mode === "register";
 
@@ -95,12 +99,25 @@ export function AuthFormCard({ mode }: { mode: AuthMode }) {
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         // body.error comes from the API, which is now sanitized
-        // server-side (no raw stack traces or DB internals). If for some
-        // reason the API still returned an unsafe-looking string, fall
-        // back to the generic toast.
-        throw new Error(
-          typeof body.error === "string" ? body.error : t("auth.failed", language)
-        );
+        // server-side (no raw stack traces or DB internals). A handful
+        // of sentinel strings get mapped to i18n messages so the user
+        // sees Hungarian, not a code.
+        const raw = typeof body.error === "string" ? body.error : "";
+        const mapped =
+          raw === "AUTH_ACCOUNT_PENDING"
+            ? t("auth.pendingAccount", language)
+            : raw === "AUTH_ACCOUNT_REJECTED"
+              ? t("auth.rejectedAccount", language)
+              : raw || t("auth.failed", language);
+        throw new Error(mapped);
+      }
+
+      // Registration: surface a "pending" panel and stop. Don't try
+      // to push the user into /app — the account is not approved yet.
+      if (isRegister && body?.pending === true) {
+        toast.success(t("auth.profileCreated", language));
+        setPendingDone(true);
+        return;
       }
 
       toast.success(
@@ -114,6 +131,20 @@ export function AuthFormCard({ mode }: { mode: AuthMode }) {
       setSubmitting(false);
     }
   };
+
+  // After a successful pending registration, replace the entire form
+  // with a confirmation panel. The user can still see the back-arrow
+  // and the cross-link from AuthShell to navigate away.
+  if (pendingDone) {
+    return (
+      <Card className="w-full max-w-lg border-white/10 bg-white/5 backdrop-blur-2xl">
+        <CardHeader>
+          <CardTitle>{t("auth.pendingTitle", language)}</CardTitle>
+          <CardDescription>{t("auth.pendingBody", language)}</CardDescription>
+        </CardHeader>
+      </Card>
+    );
+  }
 
   return (
     <Card className="w-full max-w-lg border-white/10 bg-white/5 backdrop-blur-2xl">

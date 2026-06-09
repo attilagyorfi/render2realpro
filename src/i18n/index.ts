@@ -58,6 +58,13 @@ const en = {
   "auth.profileCreated": "Profile created.",
   "auth.signedIn": "Signed in.",
   "auth.failed": "Authentication failed.",
+  "auth.pendingTitle": "Application received",
+  "auth.pendingBody":
+    "Thanks for signing up — your request is now waiting for admin approval. We'll email you the moment it's reviewed.",
+  "auth.pendingAccount":
+    "Your account is awaiting approval. We'll email you the moment it's reviewed.",
+  "auth.rejectedAccount":
+    "Your application was not approved. Please contact us if you believe this is a mistake.",
   "status.queued": "Queued",
   "status.processing": "Processing",
   "status.completed": "Completed",
@@ -300,6 +307,13 @@ const hu: Record<TranslationKey, string> = {
   "auth.profileCreated": "Profil létrehozva.",
   "auth.signedIn": "Sikeres belépés.",
   "auth.failed": "A hitelesítés nem sikerült.",
+  "auth.pendingTitle": "Jelentkezésedet megkaptuk",
+  "auth.pendingBody":
+    "Köszönjük a regisztrációt! A csapatunk hamarosan átnézi a kérelmet, és a jóváhagyásról e-mailben értesítünk.",
+  "auth.pendingAccount":
+    "A fiókod még jóváhagyásra vár. Amint elbíráljuk, e-mailben értesítünk.",
+  "auth.rejectedAccount":
+    "A jelentkezésedet sajnos elutasítottuk. Ha úgy gondolod, hogy ez tévedés, írj nekünk.",
   "status.queued": "Sorban",
   "status.processing": "Feldolgozás alatt",
   "status.completed": "Kész",

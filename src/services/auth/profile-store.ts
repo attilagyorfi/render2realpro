@@ -19,6 +19,8 @@
  * rest).
  */
 
+import { randomBytes } from "node:crypto";
+
 import bcrypt from "bcryptjs";
 
 import { prisma } from "@/lib/prisma";
@@ -47,6 +49,30 @@ export class EmailAlreadyTakenError extends Error {
   constructor() {
     super("A profile already exists with this email.");
     this.name = "EmailAlreadyTakenError";
+  }
+}
+
+/**
+ * Thrown when a valid email + password combination is supplied but the
+ * account has not yet been approved by an admin. Mapped to HTTP 403 by
+ * the login route; the message is i18n-safe text the user-facing toast
+ * can surface verbatim.
+ */
+export class AccountPendingError extends Error {
+  constructor() {
+    super("Your account is awaiting approval.");
+    this.name = "AccountPendingError";
+  }
+}
+
+/**
+ * Thrown when a valid email + password combination is supplied but the
+ * admin has explicitly rejected the account.
+ */
+export class AccountRejectedError extends Error {
+  constructor() {
+    super("Your application was not approved.");
+    this.name = "AccountRejectedError";
   }
 }
 
@@ -165,11 +191,38 @@ function userRowToProfile(row: UserRow): LocalProfile {
   };
 }
 
+/**
+ * How long an approval token sent by email stays valid. After this, the
+ * admin has to use the in-app approval list instead. Seven days gives
+ * the operator a reasonable window to act, after which the email link
+ * 410s and the applicant can simply re-register if they're still
+ * interested.
+ */
+const APPROVAL_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+export type RegistrationResult = {
+  profile: LocalProfile;
+  approvalToken: string;
+  approvalTokenExpiresAt: Date;
+};
+
+/**
+ * Create a pending user account.
+ *
+ * Sprint E / Munkacsomag 2 introduced the approval workflow: every new
+ * registration lands in status="pending" and cannot sign in until an
+ * admin promotes it to "approved". We also mint a single-use approval
+ * token here, which the caller emails to the admin so they can
+ * approve/reject in one click.
+ *
+ * Returns the profile + the freshly minted token (the caller never
+ * needs to read it back from the DB).
+ */
 export async function registerLocalProfile(input: {
   email: string;
   name: string;
   password: string;
-}): Promise<LocalProfile> {
+}): Promise<RegistrationResult> {
   assertPasswordPolicy(input.password);
   const email = normalizeProfileEmail(input.email);
   const existing = await prisma.user.findUnique({ where: { email } });
@@ -179,17 +232,25 @@ export async function registerLocalProfile(input: {
   }
 
   const passwordHash = await hashPassword(input.password);
-  const now = new Date();
+  const approvalToken = randomBytes(32).toString("base64url");
+  const approvalTokenExpiresAt = new Date(Date.now() + APPROVAL_TOKEN_TTL_MS);
+
   const created = await prisma.user.create({
     data: {
       email,
       name: input.name.trim(),
       passwordHash,
-      lastLoginAt: now,
+      status: "pending",
+      approvalToken,
+      approvalTokenExpiresAt,
     },
   });
 
-  return userRowToProfile(created);
+  return {
+    profile: userRowToProfile(created),
+    approvalToken,
+    approvalTokenExpiresAt,
+  };
 }
 
 /**
@@ -221,6 +282,17 @@ export async function loginLocalProfile(input: {
   } else {
     const ok = await verifyPassword(input.password, passwordHash);
     if (!ok) throw new InvalidCredentialsError();
+  }
+
+  // Only check the status AFTER the password matches — otherwise we'd
+  // leak "this email is registered but not approved" to anyone who can
+  // type the email (user enumeration). With this ordering, a wrong
+  // password and an unknown email both yield InvalidCredentialsError.
+  if (existing.status === "pending") {
+    throw new AccountPendingError();
+  }
+  if (existing.status === "rejected") {
+    throw new AccountRejectedError();
   }
 
   const updated = await prisma.user.update({

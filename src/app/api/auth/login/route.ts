@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import {
+  AccountPendingError,
+  AccountRejectedError,
   InvalidCredentialsError,
   loginLocalProfile,
 } from "@/services/auth/profile-store";
@@ -33,8 +35,21 @@ export async function POST(request: Request) {
       );
     }
 
-    // Log unexpected errors server-side; return generic to the client
-    // so DB internals / stack traces don't leak (see audit 8.2.1).
+    // Status-specific 403s. These only ever fire after the password
+    // already matched — see loginLocalProfile() for the rationale.
+    if (error instanceof AccountPendingError) {
+      return NextResponse.json(
+        { error: "AUTH_ACCOUNT_PENDING" },
+        { status: 403 }
+      );
+    }
+    if (error instanceof AccountRejectedError) {
+      return NextResponse.json(
+        { error: "AUTH_ACCOUNT_REJECTED" },
+        { status: 403 }
+      );
+    }
+
     console.error("[auth/login]", error);
     return NextResponse.json(
       { error: "Sign-in is temporarily unavailable. Please try again." },
