@@ -93,12 +93,16 @@ describe("texture targeting job service", () => {
       },
     });
 
+    // Sprint F: applyTexturePass is now a legacy mock kept for the
+    // preview/select payload compatibility — its jobType is tagged
+    // texture_targeting_mock so the real material-inpainting jobs
+    // (jobType: "texture_targeting") can be filtered separately.
     expect(prismaMock.generationLog.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           imageAssetId: "asset-1",
           providerName: "mock-texture-targeting",
-          jobType: "texture_targeting",
+          jobType: "texture_targeting_mock",
         }),
       })
     );
