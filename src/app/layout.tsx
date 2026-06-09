@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { AppProviders } from "./providers";
+import { BRAND } from "@/config/brand";
 
 export const metadata: Metadata = {
-  title: "FormaReal",
-  description: "Architectural render realism enhancement without redesigning the composition.",
+  title: BRAND.name,
+  description: BRAND.description,
 };
 
 export default function RootLayout({

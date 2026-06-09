@@ -144,7 +144,7 @@ const content = {
       eyebrow: "Architectural Realism Enhancement",
       badge: "B2B · Review-safe · Local-first",
       title: "The design stays\nunchanged.\nOnly the realism\nincreases.",
-      body: "FormaReal transforms approved architectural renders into photoreal delivery assets — preserving exact geometry, camera angle, and scene layout. Built for architects, engineers, and visualization studios.",
+      body: "FormaVeris transforms approved architectural renders into photoreal delivery assets — preserving exact geometry, camera angle, and scene layout. Built for architects, engineers, and visualization studios.",
       primaryCta: "Create free account",
       secondaryCta: "Explore preview",
       original: "Original render",
@@ -316,7 +316,7 @@ const content = {
       eyebrow: "Építészeti Realizmusnövelés",
       badge: "B2B · Review-safe · Helyi-first",
       title: "A terv változatlan\nmarad.\nCsak a realizmus\nnő.",
-      body: "A FormaReal jóváhagyott építészeti renderekből fotórealisztikus, átadásra kész képeket készít — megőrizve a pontos geometriát, kameraállást és jelenet-elrendezést. Építészeknek, mérnököknek és látványtervező stúdióknak.",
+      body: "A FormaVeris jóváhagyott építészeti renderekből fotórealisztikus, átadásra kész képeket készít — megőrizve a pontos geometriát, kameraállást és jelenet-elrendezést. Építészeknek, mérnököknek és látványtervező stúdióknak.",
       primaryCta: "Ingyenes fiók létrehozása",
       secondaryCta: "Termékbemutató",
       original: "Eredeti render",
@@ -508,10 +508,10 @@ export function LandingView() {
         <div className="mx-auto flex w-full max-w-[1680px] items-center justify-between gap-4 px-6 py-3.5">
           <div className="flex items-center gap-2.5">
             <div className="relative size-9 overflow-hidden rounded-xl">
-              <Image src="/logo.png" alt="FormaReal" fill unoptimized className="object-cover" />
+              <Image src="/logo.png" alt="FormaVeris" fill unoptimized className="object-cover" />
             </div>
             <span className="font-heading text-[0.95rem] font-semibold tracking-tight">
-              FormaReal
+              FormaVeris
             </span>
           </div>
 
@@ -944,7 +944,7 @@ export function LandingView() {
             <div className="relative grid gap-8 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
               <div>
                 <Badge variant="secondary" className="mb-5 bg-white/8 text-white">
-                  FormaReal
+                  FormaVeris
                 </Badge>
                 <h3 className="whitespace-pre-line text-3xl font-semibold tracking-tight text-white sm:text-4xl lg:text-[3rem]">
                   {copy.final.title}
@@ -970,9 +970,9 @@ export function LandingView() {
             <div className="flex flex-col items-center justify-between gap-4 text-xs text-muted-foreground sm:flex-row">
               <div className="flex items-center gap-2">
                 <div className="relative size-6 overflow-hidden rounded-md">
-                  <Image src="/logo.png" alt="FormaReal" fill unoptimized className="object-cover" />
+                  <Image src="/logo.png" alt="FormaVeris" fill unoptimized className="object-cover" />
                 </div>
-                <span>FormaReal</span>
+                <span>FormaVeris</span>
               </div>
               <div className="flex items-center gap-4">
                 <Link href="/login" className="transition hover:text-foreground">{copy.nav.signIn}</Link>

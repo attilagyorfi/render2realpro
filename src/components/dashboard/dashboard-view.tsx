@@ -14,6 +14,7 @@ import { AppFrame } from "@/components/layout/app-frame";
 import { ProjectCreateForm } from "@/components/projects/project-create-form";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
+import { BRAND } from "@/config/brand";
 import { t } from "@/i18n";
 import { useAppPreferencesStore } from "@/store/app-preferences";
 
@@ -22,7 +23,7 @@ export function DashboardView() {
   const router = useRouter();
 
   return (
-    <AppFrame eyebrow={t("common.appEyebrow", language)} title="FormaReal">
+    <AppFrame eyebrow={t("common.appEyebrow", language)} title={BRAND.name}>
       <div className="grid gap-5">
 
         {/* ── HERO BANNER ──────────────────────────────────────────────────── */}
