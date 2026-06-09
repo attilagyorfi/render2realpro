@@ -12,12 +12,15 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { t } from "@/i18n";
+import { useAppPreferencesStore } from "@/store/app-preferences";
 
 type AuthMode = "login" | "register";
 
 const MIN_PASSWORD_LENGTH = 8;
 
 export function AuthFormCard({ mode }: { mode: AuthMode }) {
+  const language = useAppPreferencesStore((state) => state.language);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -36,21 +39,28 @@ export function AuthFormCard({ mode }: { mode: AuthMode }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
-          isRegister
-            ? { name, email, password }
-            : { email, password }
+          isRegister ? { name, email, password } : { email, password }
         ),
       });
 
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(body.error ?? "Authentication failed.");
+        // body.error comes from the API, which is now sanitized
+        // server-side (no raw stack traces or DB internals). If for some
+        // reason the API still returned an unsafe-looking string, fall
+        // back to the generic toast.
+        throw new Error(
+          typeof body.error === "string" ? body.error : t("auth.failed", language)
+        );
       }
 
-      toast.success(isRegister ? "Profile created." : "Signed in.");
+      toast.success(
+        t(isRegister ? "auth.profileCreated" : "auth.signedIn", language)
+      );
       window.location.assign("/app");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Authentication failed.");
+      const message = error instanceof Error ? error.message : t("auth.failed", language);
+      toast.error(message);
     } finally {
       setSubmitting(false);
     }
@@ -59,11 +69,11 @@ export function AuthFormCard({ mode }: { mode: AuthMode }) {
   return (
     <Card className="w-full max-w-lg border-white/10 bg-white/5 backdrop-blur-2xl">
       <CardHeader>
-        <CardTitle>{isRegister ? "Create free account" : "Sign in"}</CardTitle>
+        <CardTitle>
+          {t(isRegister ? "auth.createTitle" : "auth.signInTitle", language)}
+        </CardTitle>
         <CardDescription>
-          {isRegister
-            ? "Create a local SaaS pilot profile. Your projects will be tied to this profile on this machine."
-            : "Sign back into your local pilot profile to continue with your saved projects."}
+          {t(isRegister ? "auth.createBody" : "auth.signInBody", language)}
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-3">
@@ -71,31 +81,32 @@ export function AuthFormCard({ mode }: { mode: AuthMode }) {
           <Input
             value={name}
             onChange={(event) => setName(event.target.value)}
-            placeholder="Full name"
+            placeholder={t("auth.fullName", language)}
           />
         ) : null}
         <Input
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          placeholder="Email address"
+          placeholder={t("auth.emailPlaceholder", language)}
           type="email"
           autoComplete="email"
         />
         <Input
           value={password}
           onChange={(event) => setPassword(event.target.value)}
-          placeholder={
+          placeholder={t(
             isRegister
-              ? `Password (at least ${MIN_PASSWORD_LENGTH} characters)`
-              : "Password"
-          }
+              ? "auth.passwordPlaceholderRegister"
+              : "auth.passwordPlaceholder",
+            language
+          )}
           type="password"
           autoComplete={isRegister ? "new-password" : "current-password"}
           minLength={MIN_PASSWORD_LENGTH}
         />
         {isRegister && password.length > 0 && !passwordOk ? (
           <p className="text-xs text-amber-300/80">
-            Password must be at least {MIN_PASSWORD_LENGTH} characters.
+            {t("auth.passwordHint", language)}
           </p>
         ) : null}
         <Button
@@ -103,7 +114,7 @@ export function AuthFormCard({ mode }: { mode: AuthMode }) {
           onClick={submit}
           disabled={submitting || formInvalid}
         >
-          {isRegister ? "Create profile" : "Continue"}
+          {t(isRegister ? "auth.createCta" : "auth.continueCta", language)}
         </Button>
       </CardContent>
     </Card>
