@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -19,18 +20,66 @@ type AuthMode = "login" | "register";
 
 const MIN_PASSWORD_LENGTH = 8;
 
+/**
+ * Inline label for the terms-acceptance checkbox. Hand-composed JSX
+ * rather than a single i18n string because of the two inline links —
+ * trying to template "Elfogadom az {0}-et és az {1}-ot" out of the
+ * dictionary makes the surrounding code more brittle than it earns.
+ */
+function TermsAcceptanceLabel({ language }: { language: "hu" | "en" }) {
+  if (language === "hu") {
+    return (
+      <>
+        Elfogadom az{" "}
+        <Link href="/jogi/aszf" target="_blank" className="underline hover:text-foreground">
+          ÁSZF
+        </Link>
+        -et és az{" "}
+        <Link
+          href="/jogi/adatkezeles"
+          target="_blank"
+          className="underline hover:text-foreground"
+        >
+          Adatkezelési tájékoztatót
+        </Link>
+        .
+      </>
+    );
+  }
+  return (
+    <>
+      I accept the{" "}
+      <Link href="/jogi/aszf" target="_blank" className="underline hover:text-foreground">
+        Terms
+      </Link>{" "}
+      and the{" "}
+      <Link
+        href="/jogi/adatkezeles"
+        target="_blank"
+        className="underline hover:text-foreground"
+      >
+        Privacy Policy
+      </Link>
+      .
+    </>
+  );
+}
+
 export function AuthFormCard({ mode }: { mode: AuthMode }) {
   const language = useAppPreferencesStore((state) => state.language);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   const isRegister = mode === "register";
 
   const passwordOk = password.length >= MIN_PASSWORD_LENGTH;
   const formInvalid =
-    !email || !passwordOk || (isRegister && name.trim().length < 2);
+    !email ||
+    !passwordOk ||
+    (isRegister && (name.trim().length < 2 || !acceptedTerms));
 
   const submit = async () => {
     try {
@@ -109,6 +158,21 @@ export function AuthFormCard({ mode }: { mode: AuthMode }) {
             {t("auth.passwordHint", language)}
           </p>
         ) : null}
+
+        {isRegister ? (
+          <label className="mt-1 flex items-start gap-2.5 cursor-pointer text-xs leading-relaxed text-muted-foreground select-none">
+            <input
+              type="checkbox"
+              checked={acceptedTerms}
+              onChange={(event) => setAcceptedTerms(event.target.checked)}
+              className="mt-0.5 size-4 shrink-0 cursor-pointer rounded border border-white/20 bg-white/5 text-violet-500 focus:ring-1 focus:ring-violet-500/60"
+            />
+            <span>
+              <TermsAcceptanceLabel language={language} />
+            </span>
+          </label>
+        ) : null}
+
         <Button
           type="button"
           onClick={submit}
