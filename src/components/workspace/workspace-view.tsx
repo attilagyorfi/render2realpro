@@ -1874,10 +1874,14 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
           imageHeight={selectedAsset.height ?? 768}
           projectId={projectId}
           assetId={selectedAsset.id}
-          onResult={() => {
+          onResult={(newVersionId) => {
             toast.success(language === "hu" ? "Anyagcsere alkalmazva!" : "Material applied!");
             setInpaintingOpen(false);
-            // Refresh project data to pick up any saved version
+            // Switch the workspace to the new texture-pass version so
+            // the before/after comparison lights up automatically.
+            if (selectedAsset) {
+              setSelectedAsset(selectedAsset.id, newVersionId);
+            }
             queryClient.invalidateQueries({ queryKey: ["project", projectId] });
           }}
           onClose={() => setInpaintingOpen(false)}
