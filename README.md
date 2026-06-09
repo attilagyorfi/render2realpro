@@ -76,10 +76,20 @@ The app is structured so prompt generation, presets, provider boundaries, and UI
    docker compose up -d
    ```
 
-   This boots `postgres:16-alpine` on `localhost:5432` with the credentials
-   that `.env.example` expects. The data lives in the `render2real_pgdata`
-   named volume and survives `docker compose down`. To wipe everything:
-   `docker compose down -v`.
+   This boots `postgres:16-alpine` on `localhost:5433` (mapped from the
+   container's 5432, so it doesn't clash with a native Postgres install)
+   with the credentials that `.env.example` expects. The data lives in
+   the `render2real_pgdata` named volume and survives
+   `docker compose down`. To wipe everything: `docker compose down -v`.
+
+   > **If `prisma db push` says `authentication failed`**: the volume
+   > was created with a different password. The `POSTGRES_PASSWORD` env
+   > var is only applied to an empty volume — once data exists, it's
+   > ignored. Reset:
+   > ```bash
+   > docker compose down -v && docker compose up -d
+   > npm run db:push && npm run db:seed
+   > ```
 
 3. **Create your local `.env`**
 

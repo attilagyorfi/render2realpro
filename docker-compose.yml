@@ -21,7 +21,7 @@ services:
       POSTGRES_PASSWORD: render2real_dev
       POSTGRES_DB: render2real_dev
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - render2real_pgdata:/var/lib/postgresql/data
     healthcheck:
