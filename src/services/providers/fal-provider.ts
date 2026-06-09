@@ -38,20 +38,23 @@ import type {
 } from "./provider-adapter";
 
 const DEFAULT_MODEL = process.env.FAL_MODEL ?? "fal-ai/flux-pro/v1/canny";
-// Lower conditioning_scale leaves more room for photorealistic texture and
-// lighting; 0.75 was reproducing the source's flat-shaded look. 0.5 is the
-// architectural sweet spot — strong enough to preserve geometry, loose
-// enough to let the model invent realistic materials.
-const DEFAULT_CONTROL_WEIGHT = Number(process.env.FAL_CONTROL_WEIGHT ?? "0.5");
+// How tightly the model must follow the Canny edge map. At 0.5 the model
+// took too many liberties and started reinterpreting an industrial
+// exterior as a wood-clad interior. 0.75 brings the geometry back —
+// edges become near-mandatory — at the cost of slightly less material
+// invention. The "Magas" generation-quality button bumps this further
+// up in the quality-tuning logic below.
+const DEFAULT_CONTROL_WEIGHT = Number(process.env.FAL_CONTROL_WEIGHT ?? "0.75");
 // More inference steps trade a few seconds of latency for visibly sharper
 // materials and lighting; 40 is the practical ceiling before diminishing
 // returns on Flux Pro v1.
 const DEFAULT_INFERENCE_STEPS = Number(process.env.FAL_INFERENCE_STEPS ?? "40");
-// Higher guidance pushes the model harder toward the prompt's photographic
-// language. 3.5 was too permissive — outputs stayed close to the input
-// render's washed-out look. 7 is the standard "follow the prompt firmly"
-// value for Flux without going into oversaturation territory.
-const DEFAULT_GUIDANCE_SCALE = Number(process.env.FAL_GUIDANCE_SCALE ?? "7");
+// Guidance pushes the model toward the prompt's photographic language.
+// 7 was sending it too hard toward magazine-photography aesthetics
+// (carved wood, soft daylight) which then conflicted with the source
+// render's geometry. 4.5 lets the prompt steer the materials without
+// overriding the structural cues from the Canny edge map.
+const DEFAULT_GUIDANCE_SCALE = Number(process.env.FAL_GUIDANCE_SCALE ?? "4.5");
 
 let configured = false;
 
@@ -123,17 +126,22 @@ export class FalAiProvider implements ProviderAdapter {
     const sourceUrl = await fal.storage.upload(sourceFile);
 
     // ── 3. Build prompt ────────────────────────────────────────────────────
-    // Flux responds far better to descriptive *photographic* language than
-    // to engineering checklists. The previous prompt was a list of
-    // preservation rules; the model interpreted that as "stay as close to
-    // the input as possible" and never invented any real material or light.
-    // We now lead with photography vocabulary, name concrete materials,
-    // and describe the lighting before we mention any preservation rule.
+    // The previous version of this builder led with magazine-photography
+    // vocabulary ("oak wood", "Hasselblad", "interior light") and pushed
+    // the preservation contract to the tail. With ControlNet at 0.5 that
+    // produced outputs that broadly ignored the source — e.g. an
+    // industrial exterior turned into a wood-clad interior. Flux weighs
+    // the front of the prompt the hardest, so the preservation contract
+    // now goes FIRST; the photographic vocabulary comes after, only to
+    // dress what the geometry already dictates.
     const promptParts: string[] = [
-      "RAW photo, professional architectural photography, ultra-realistic, photorealistic, shot on a Hasselblad H6D medium format camera, 50mm prime lens, sharp focus, natural daylight.",
-      "High-end architecture magazine photography style: rich material detail, true-to-life textures, subtle surface imperfections, soft directional shadows, ambient occlusion in corners, light bouncing off polished surfaces.",
-      "Materials should look real: brushed concrete with fine aggregate, polished limestone or terrazzo floor with soft specular reflections, oak or walnut wood with visible grain, brushed aluminium or anodised metal trims, clear architectural glass with subtle reflections and slight tinting, white painted plaster walls with minimal texture.",
-      "Lighting: warm natural daylight streaming through windows, soft volumetric light, gentle contact shadows under objects, golden-hour ambient tones.",
+      // 1) Preserve, loud and early.
+      "Photorealistic rendering of the EXACT scene shown in the control image. Preserve the original camera angle, perspective, framing, and field of view bit-for-bit.",
+      "Preserve every architectural element exactly as drawn: building footprint, facade geometry, window positions, column spacing, roof shape, vehicles, vegetation, ground surfaces.",
+      "Do NOT redesign the building. Do NOT change interior vs. exterior. Do NOT reinterpret the scene as something different.",
+      // 2) THEN the realism upgrade — but only on what's already there.
+      "Upgrade the existing surfaces to photoreal materials: weathered concrete or precast panels for the building, asphalt or compacted gravel for the ground, real metal cladding where the render shows metal, glass with subtle reflections only where windows already exist.",
+      "Natural outdoor daylight from the same direction as the source, soft contact shadows, atmospheric haze in the distance, professional architectural exterior photography.",
     ];
     if (input.prompt.presetName && input.prompt.presetName !== "custom") {
       promptParts.push(`Style preset: ${input.prompt.presetName}.`);
@@ -141,13 +149,9 @@ export class FalAiProvider implements ProviderAdapter {
     if (input.prompt.customDirectives?.length) {
       promptParts.push(...input.prompt.customDirectives);
     }
-    // Preservation contract goes LAST — Flux weighs the front of the prompt
-    // more heavily, so the photo-style language dominates while these
-    // constraints still ride along.
     promptParts.push(
-      "Strictly preserve the original camera angle, perspective, framing, and field of view.",
-      "Preserve every architectural element exactly: building footprint, facade geometry, window positions, column spacing, roof shape, and all structural details.",
-      "No redesign, no extra people, no extra buildings, no composition changes, no cartoon style, no illustration look, no flat shading, no 3D-render look."
+      // 3) Hard-negative cues for the failure modes we've actually seen.
+      "No interior. No indoor wood paneling. No skylights or roof openings that aren't in the source. No new vehicles, no new people, no extra buildings, no fantasy elements, no flat shading, no 3D-render look, no cartoon style."
     );
     const prompt = promptParts.join(" ");
 
