@@ -7,6 +7,7 @@ import {
   ArrowRight,
   ChevronUp,
   Languages,
+  Menu,
   ShieldCheck,
   Layers,
   Zap,
@@ -27,6 +28,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Sheet,
+  SheetContent,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { useAppPreferencesStore } from "@/store/app-preferences";
 
 // ─── reveal animation preset ─────────────────────────────────────────────────
@@ -143,12 +150,13 @@ const content = {
     hero: {
       eyebrow: "Architectural Realism Enhancement",
       badge: "B2B · Review-safe · Local-first",
-      title: "The design stays\nunchanged.\nOnly the realism\nincreases.",
-      body: "FormaVeris transforms approved architectural renders into photoreal delivery assets — preserving exact geometry, camera angle, and scene layout. Built for architects, engineers, and visualization studios.",
+      title: "Photorealistic architectural\nrenders — without changing\na single line of the design.",
+      body: "FormaVeris turns your approved visualizations into delivery-ready, photorealistic images. Geometry, camera angle, and composition stay bit-for-bit intact. Built for architects, engineers, and visualization studios.",
       primaryCta: "Create free account",
       secondaryCta: "Explore preview",
       original: "Original render",
       output: "AI-enhanced result",
+      compareHint: "Drag to compare · AI-enhanced result",
       bullets: [
         "Exact camera angle preserved",
         "Exact geometry & massing preserved",
@@ -156,10 +164,10 @@ const content = {
       ],
     },
     stats: [
-      { value: 100, suffix: "%", label: "Geometry preserved" },
-      { value: 0, suffix: "", label: "Redesign. Ever." },
+      { value: 100, suffix: "%", label: "Composition preserved" },
       { value: 4, suffix: " steps", label: "From render to delivery" },
-      { value: 7, suffix: " presets", label: "Material categories" },
+      { value: 10, suffix: "", label: "Built-in realism presets" },
+      { value: 15, suffix: "s", label: "Typical AI generation time" },
     ],
     integrations: {
       title: "Fits into the tools architecture teams already use.",
@@ -182,7 +190,7 @@ const content = {
         {
           icon: Layers,
           title: "Preset-driven workflow",
-          body: "7 material presets — brick, concrete, glass, wood, metal, roof, asphalt — each tuned for architectural fidelity.",
+          body: "10 built-in realism presets — industrial, commercial, residential, warm-daylight, high-end photography, and more — each tuned for architectural fidelity.",
           accent: "blue",
         },
         {
@@ -314,13 +322,14 @@ const content = {
     },
     hero: {
       eyebrow: "Építészeti Realizmusnövelés",
-      badge: "B2B · Review-safe · Helyi-first",
-      title: "A terv változatlan\nmarad.\nCsak a realizmus\nnő.",
-      body: "A FormaVeris jóváhagyott építészeti renderekből fotórealisztikus, átadásra kész képeket készít — megőrizve a pontos geometriát, kameraállást és jelenet-elrendezést. Építészeknek, mérnököknek és látványtervező stúdióknak.",
+      badge: "B2B · Review-biztos · Helyi-first",
+      title: "Fotórealisztikus építészeti\nrenderek — a terv\negyetlen vonalának\nmegváltoztatása nélkül.",
+      body: "A FormaVeris a jóváhagyott látványterveidet átadásra kész, fotórealisztikus képpé alakítja. A geometria, a kameraállás és a kompozíció bitről bitre megmarad. Építészeknek, mérnököknek és látványtervező stúdióknak.",
       primaryCta: "Ingyenes fiók létrehozása",
       secondaryCta: "Termékbemutató",
       original: "Eredeti render",
       output: "AI-javított eredmény",
+      compareHint: "Húzd az összehasonlításhoz · AI-javított eredmény",
       bullets: [
         "Pontos kameraállás megőrzve",
         "Pontos geometria és tömegformálás megőrzve",
@@ -328,10 +337,10 @@ const content = {
       ],
     },
     stats: [
-      { value: 100, suffix: "%", label: "Geometria megőrzve" },
-      { value: 0, suffix: "", label: "Újratervezés. Soha." },
+      { value: 100, suffix: "%", label: "Kompozíció megőrizve" },
       { value: 4, suffix: " lépés", label: "Rendertől az átadásig" },
-      { value: 7, suffix: " preset", label: "Anyagkategória" },
+      { value: 10, suffix: "", label: "Beépített realizmus preset" },
+      { value: 15, suffix: "mp", label: "Tipikus AI generálási idő" },
     ],
     integrations: {
       title: "Illeszkedik azokhoz az eszközökhöz, amelyeket az építészeti csapatok már ma is használnak.",
@@ -354,7 +363,7 @@ const content = {
         {
           icon: Layers,
           title: "Preset-vezérelt workflow",
-          body: "7 anyagpreset — tégla, beton, üveg, fa, fém, tető, aszfalt — mindegyik az építészeti hűségre hangolva.",
+          body: "10 beépített realizmus preset — ipari, kereskedelmi, lakó, meleg nappali, prémium fotózás, és további kategóriák — mindegyik az építészeti hűségre hangolva.",
           accent: "blue",
         },
         {
@@ -508,13 +517,15 @@ export function LandingView() {
         <div className="mx-auto flex w-full max-w-[1680px] items-center justify-between gap-4 px-6 py-3.5">
           <div className="flex items-center gap-2.5">
             <div className="relative size-9 overflow-hidden rounded-xl">
-              <Image src="/logo.png" alt="FormaVeris" fill unoptimized className="object-cover" />
+              <Image src="/logo.png" alt="FormaVeris" fill className="object-cover" />
             </div>
             <span className="font-heading text-[0.95rem] font-semibold tracking-tight">
               FormaVeris
             </span>
           </div>
 
+          {/* Section anchors — visible on xl+; mobile/tablet users see
+              the hamburger Sheet on the right instead. */}
           <nav className="hidden items-center gap-6 text-sm text-muted-foreground xl:flex">
             {[
               ["#workflow", copy.nav.workflow],
@@ -530,10 +541,16 @@ export function LandingView() {
           </nav>
 
           <div className="flex items-center gap-2">
-            <Link href="/login" className={buttonVariants({ variant: "ghost", size: "sm" })}>
+            <Link
+              href="/login"
+              className={buttonVariants({ variant: "ghost", size: "sm" }) + " hidden sm:inline-flex"}
+            >
               {copy.nav.signIn}
             </Link>
-            <Link href="/register" className={buttonVariants({ variant: "default", size: "sm" })}>
+            <Link
+              href="/register"
+              className={buttonVariants({ variant: "default", size: "sm" }) + " hidden sm:inline-flex"}
+            >
               {language === "hu" ? "Ingyenes fiók létrehozása" : "Create free account"}
               <ArrowRight data-icon="inline-end" />
             </Link>
@@ -549,6 +566,66 @@ export function LandingView() {
                 </SelectGroup>
               </SelectContent>
             </Select>
+
+            {/* Hamburger menu — below xl. Mirrors the section anchors and
+                surfaces the auth CTAs in one place so mobile/tablet users
+                aren't stranded with no navigation at all. */}
+            <Sheet>
+              <SheetTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label={language === "hu" ? "Menü" : "Menu"}
+                    className={
+                      buttonVariants({ variant: "ghost", size: "icon-sm" }) +
+                      " xl:hidden"
+                    }
+                  />
+                }
+              >
+                <Menu />
+              </SheetTrigger>
+              <SheetContent
+                side="top"
+                className="bg-[#0a0d14] border-white/10 px-6 py-8"
+              >
+                <SheetTitle className="text-xs uppercase tracking-[0.22em] text-muted-foreground">
+                  {language === "hu" ? "Navigáció" : "Navigation"}
+                </SheetTitle>
+                <nav className="mt-6 flex flex-col gap-2 text-base font-medium text-foreground">
+                  {[
+                    ["#workflow", copy.nav.workflow],
+                    ["#compare", copy.nav.compare],
+                    ["#preview", copy.nav.preview],
+                    ["#pricing", copy.nav.pricing],
+                    ["#faq", copy.nav.faq],
+                  ].map(([href, label]) => (
+                    <a
+                      key={href}
+                      href={href}
+                      className="rounded-lg border border-white/8 px-4 py-3 transition hover:bg-white/5"
+                    >
+                      {label}
+                    </a>
+                  ))}
+                </nav>
+                <div className="mt-8 flex flex-col gap-2">
+                  <Link
+                    href="/login"
+                    className={buttonVariants({ variant: "outline", size: "lg", className: "w-full" })}
+                  >
+                    {copy.nav.signIn}
+                  </Link>
+                  <Link
+                    href="/register"
+                    className={buttonVariants({ variant: "default", size: "lg", className: "w-full" })}
+                  >
+                    {language === "hu" ? "Ingyenes fiók létrehozása" : "Create free account"}
+                    <ArrowRight data-icon="inline-end" />
+                  </Link>
+                </div>
+              </SheetContent>
+            </Sheet>
           </div>
         </div>
       </header>
@@ -574,9 +651,9 @@ export function LandingView() {
                 </Badge>
               </div>
 
-              <h2 className="whitespace-pre-line text-[2.6rem] font-semibold leading-[1.0] tracking-[-0.04em] text-white sm:text-[3.5rem] xl:text-[4.5rem]">
+              <h1 className="whitespace-pre-line text-[2.6rem] font-semibold leading-[1.0] tracking-[-0.04em] text-white sm:text-[3.5rem] xl:text-[4.5rem]">
                 {copy.hero.title}
-              </h2>
+              </h1>
 
               <p className="max-w-lg text-base leading-8 text-zinc-400 lg:text-lg">
                 {copy.hero.body}
@@ -611,8 +688,8 @@ export function LandingView() {
             >
               <div className="relative h-[420px] w-full overflow-hidden rounded-[36px] border border-white/10 shadow-2xl shadow-black/50 sm:h-[520px] xl:h-[600px]">
                 <CompareSlider
-                  before="/hero-render-before.png"
-                  after="/hero-render-after.png"
+                  before="/hero-render-before.webp"
+                  after="/hero-render-after.webp"
                   beforeLabel={copy.hero.original}
                   afterLabel={copy.hero.output}
                 />
@@ -621,7 +698,7 @@ export function LandingView() {
               <div className="absolute -bottom-4 left-1/2 -translate-x-1/2">
                 <div className="flex items-center gap-2 rounded-full border border-white/15 bg-black/70 px-4 py-2 text-xs text-zinc-300 shadow-xl backdrop-blur-xl">
                   <div className="size-1.5 animate-pulse rounded-full bg-blue-400" />
-                  Drag to compare · AI-enhanced result
+                  {copy.hero.compareHint}
                 </div>
               </div>
             </motion.div>
@@ -681,9 +758,9 @@ export function LandingView() {
               <div className="text-[0.68rem] uppercase tracking-[0.22em] text-muted-foreground">
                 {copy.features.eyebrow}
               </div>
-              <h3 className="mt-4 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl lg:text-[3rem]">
+              <h2 className="mt-4 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl lg:text-[3rem]">
                 {copy.features.title}
-              </h3>
+              </h2>
             </div>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {copy.features.items.map((feature, i) => {
@@ -699,7 +776,7 @@ export function LandingView() {
                     <div className={`mb-4 flex size-11 items-center justify-center rounded-[16px] bg-gradient-to-br ${colors} border`}>
                       <Icon className={`size-5 ${colors.split(" ").find(c => c.startsWith("text-")) ?? "text-blue-400"}`} />
                     </div>
-                    <h4 className="text-base font-semibold text-foreground">{feature.title}</h4>
+                    <h3 className="text-base font-semibold text-foreground">{feature.title}</h3>
                     <p className="mt-2 text-sm leading-6 text-muted-foreground">{feature.body}</p>
                   </motion.div>
                 );
@@ -717,9 +794,9 @@ export function LandingView() {
                 <div className="text-[0.68rem] uppercase tracking-[0.22em] text-muted-foreground">
                   {copy.trust.eyebrow}
                 </div>
-                <h3 className="mt-4 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+                <h2 className="mt-4 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
                   {copy.trust.title}
-                </h3>
+                </h2>
               </div>
               <div className="grid gap-3">
                 {copy.trust.items.map((item) => (
@@ -742,9 +819,9 @@ export function LandingView() {
                 <div className="text-[0.68rem] uppercase tracking-[0.22em] text-muted-foreground">
                   {copy.workflow.eyebrow}
                 </div>
-                <h3 className="mt-4 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl lg:text-[3rem]">
+                <h2 className="mt-4 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl lg:text-[3rem]">
                   {copy.workflow.title}
-                </h3>
+                </h2>
               </div>
               <p className="text-base leading-8 text-muted-foreground lg:max-w-lg">
                 {copy.workflow.body}
@@ -764,7 +841,7 @@ export function LandingView() {
                   <div className="font-mono text-[2.2rem] font-semibold leading-none tracking-tight text-white/15">
                     {step.num}
                   </div>
-                  <h4 className="mt-4 text-base font-semibold text-foreground">{step.title}</h4>
+                  <h3 className="mt-4 text-base font-semibold text-foreground">{step.title}</h3>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">{step.body}</p>
                 </motion.div>
               ))}
@@ -778,9 +855,9 @@ export function LandingView() {
                 <div className="text-[0.68rem] uppercase tracking-[0.22em] text-muted-foreground">
                   {copy.comparison.eyebrow}
                 </div>
-                <h3 className="mt-4 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl lg:text-[3rem]">
+                <h2 className="mt-4 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl lg:text-[3rem]">
                   {copy.comparison.title}
-                </h3>
+                </h2>
               </div>
               <div>
                 <p className="text-base leading-8 text-muted-foreground">{copy.comparison.body}</p>
@@ -796,8 +873,8 @@ export function LandingView() {
             </div>
             <div className="relative h-[420px] overflow-hidden rounded-[36px] border border-white/10 shadow-2xl shadow-black/40 sm:h-[520px] lg:h-[640px]">
               <CompareSlider
-                before="/hero-render-before.png"
-                after="/hero-render-after.png"
+                before="/hero-render-before.webp"
+                after="/hero-render-after.webp"
                 beforeLabel={copy.comparison.before}
                 afterLabel={copy.comparison.after}
               />
@@ -811,9 +888,9 @@ export function LandingView() {
               <div className="text-[0.68rem] uppercase tracking-[0.22em] text-muted-foreground">
                 {copy.why.eyebrow}
               </div>
-              <h3 className="mt-4 max-w-3xl text-3xl font-semibold tracking-tight text-foreground sm:text-4xl lg:text-[3rem]">
+              <h2 className="mt-4 max-w-3xl text-3xl font-semibold tracking-tight text-foreground sm:text-4xl lg:text-[3rem]">
                 {copy.why.title}
-              </h3>
+              </h2>
             </div>
             <div className="grid gap-4 lg:grid-cols-3">
               {copy.why.items.map(([title, body], i) => (
@@ -826,7 +903,7 @@ export function LandingView() {
                   <div className="mb-3 flex size-9 items-center justify-center rounded-[14px] border border-blue-500/25 bg-blue-500/10">
                     <Zap className="size-4 text-blue-400" />
                   </div>
-                  <h4 className="text-base font-semibold text-foreground">{title}</h4>
+                  <h3 className="text-base font-semibold text-foreground">{title}</h3>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">{body}</p>
                 </motion.div>
               ))}
@@ -839,9 +916,9 @@ export function LandingView() {
               <div className="text-[0.68rem] uppercase tracking-[0.22em] text-muted-foreground">
                 {copy.pricing.eyebrow}
               </div>
-              <h3 className="mt-4 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl lg:text-[3rem]">
+              <h2 className="mt-4 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl lg:text-[3rem]">
                 {copy.pricing.title}
-              </h3>
+              </h2>
               <p className="mx-auto mt-4 max-w-2xl text-base leading-8 text-muted-foreground">
                 {copy.pricing.body}
               </p>
@@ -916,9 +993,9 @@ export function LandingView() {
               <div className="text-[0.68rem] uppercase tracking-[0.22em] text-muted-foreground">
                 {copy.faq.eyebrow}
               </div>
-              <h3 className="mt-4 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl lg:text-[3rem]">
+              <h2 className="mt-4 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl lg:text-[3rem]">
                 {copy.faq.title}
-              </h3>
+              </h2>
             </div>
             <div className="grid gap-0">
               {copy.faq.items.map(([question, answer]) => (
@@ -946,9 +1023,9 @@ export function LandingView() {
                 <Badge variant="secondary" className="mb-5 bg-white/8 text-white">
                   FormaVeris
                 </Badge>
-                <h3 className="whitespace-pre-line text-3xl font-semibold tracking-tight text-white sm:text-4xl lg:text-[3rem]">
+                <h2 className="whitespace-pre-line text-3xl font-semibold tracking-tight text-white sm:text-4xl lg:text-[3rem]">
                   {copy.final.title}
-                </h3>
+                </h2>
                 <p className="mt-5 max-w-2xl text-base leading-8 text-zinc-400">
                   {copy.final.body}
                 </p>
@@ -966,17 +1043,32 @@ export function LandingView() {
           </motion.section>
 
           {/* ── FOOTER ────────────────────────────────────────────────────── */}
-          <footer className="border-t border-white/8 pb-4 pt-10">
-            <div className="flex flex-col items-center justify-between gap-4 text-xs text-muted-foreground sm:flex-row">
+          <footer className="border-t border-white/8 pb-6 pt-10">
+            <div className="grid gap-6 text-xs text-muted-foreground sm:grid-cols-[1fr_auto] sm:items-start">
               <div className="flex items-center gap-2">
                 <div className="relative size-6 overflow-hidden rounded-md">
-                  <Image src="/logo.png" alt="FormaVeris" fill unoptimized className="object-cover" />
+                  <Image src="/logo.png" alt="FormaVeris" fill className="object-cover" />
                 </div>
-                <span>FormaVeris</span>
+                <span className="font-medium text-foreground">FormaVeris</span>
+                <span className="text-muted-foreground">
+                  · {language === "hu" ? "egy M Mérnöki Iroda Kft. termék" : "by M Mérnöki Iroda Kft."}
+                </span>
               </div>
-              <div className="flex items-center gap-4">
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
                 <Link href="/login" className="transition hover:text-foreground">{copy.nav.signIn}</Link>
                 <Link href="/register" className="transition hover:text-foreground">{copy.nav.create}</Link>
+                <Link href="/kapcsolat" className="transition hover:text-foreground">
+                  {language === "hu" ? "Kapcsolat" : "Contact"}
+                </Link>
+                <Link href="/jogi/aszf" className="transition hover:text-foreground">
+                  {language === "hu" ? "ÁSZF" : "Terms"}
+                </Link>
+                <Link href="/jogi/adatkezeles" className="transition hover:text-foreground">
+                  {language === "hu" ? "Adatkezelés" : "Privacy"}
+                </Link>
+                <Link href="/jogi/impresszum" className="transition hover:text-foreground">
+                  {language === "hu" ? "Impresszum" : "Imprint"}
+                </Link>
               </div>
             </div>
           </footer>
