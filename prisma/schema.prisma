@@ -8,23 +8,35 @@ datasource db {
 }
 
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
-  name         String
+  id                     String    @id @default(cuid())
+  email                  String    @unique
+  name                   String
   // bcrypt hash; nullable for now so the JSON-profile migration can land
   // without backfilling passwords. Sprint 2.3 will require it.
-  passwordHash String?
+  passwordHash           String?
   // Role-based authorization. "user" is the default; "admin" unlocks the
   // /app/admin surface and the /api/admin/* endpoints. There is no UI for
   // promoting users yet — flip the field in the DB (psql or Prisma Studio)
   // to grant admin access.
-  role         String    @default("user")
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  lastLoginAt  DateTime?
-  projects     Project[]
+  role                   String    @default("user")
+  // Approval workflow (Sprint E / Munkacsomag 2). New registrations land
+  // as "pending"; an admin moves them to "approved" or "rejected" via the
+  // tokenised email link or the /app/admin pending-registrations list.
+  // Only "approved" users can sign in.
+  status                 String    @default("pending")
+  approvedAt             DateTime?
+  // Single-use token attached to the admin notification email so a
+  // one-click approve / reject is possible. Cleared after use or expiry.
+  approvalToken          String?   @unique
+  approvalTokenExpiresAt DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  lastLoginAt            DateTime?
+  projects               Project[]
 
   @@index([email])
+  // Hot lookup: admin list of pending registrations sorted by recency.
+  @@index([status, createdAt])
 }
 
 model Project {

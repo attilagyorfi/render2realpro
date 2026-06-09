@@ -186,9 +186,27 @@ const DEFAULT_PRESET_CATALOG = [
   },
 ];
 
+/**
+ * The platform admin account. Created automatically by the seed so the
+ * very first run already has a user who can approve incoming
+ * registrations.
+ *
+ * passwordHash is intentionally left null. Sprint 2.3 added a "first
+ * login sets the password" branch to loginLocalProfile() — so the very
+ * first sign-in at /login as info@g2amarketing.hu will store whatever
+ * password is supplied (subject to the 8-char minimum), and every
+ * subsequent sign-in uses the normal compare path. No psql gymnastics
+ * required.
+ *
+ * The matching email also drives ADMIN_NOTIFY_EMAIL (see appEnv).
+ */
+const ADMIN_EMAIL = "info@g2amarketing.hu";
+const ADMIN_NAME = "G2A Marketing";
+
 async function main() {
   const prisma = new PrismaClient();
 
+  // ── Preset catalogue ───────────────────────────────────────────────────
   for (const preset of DEFAULT_PRESET_CATALOG) {
     await prisma.preset.upsert({
       where: { name: preset.name },
@@ -204,6 +222,42 @@ async function main() {
         settingsJson: JSON.stringify(preset.settings),
       },
     });
+  }
+
+  // ── Admin account ──────────────────────────────────────────────────────
+  // Upsert: if it already exists, force role=admin + status=approved
+  // but DO NOT touch its passwordHash (so a rotated password sticks).
+  // If it doesn't exist yet, create it with the placeholder hash that
+  // can't actually sign anyone in.
+  const adminExisting = await prisma.user.findUnique({
+    where: { email: ADMIN_EMAIL },
+    select: { id: true },
+  });
+
+  if (adminExisting) {
+    await prisma.user.update({
+      where: { email: ADMIN_EMAIL },
+      data: {
+        role: "admin",
+        status: "approved",
+        approvedAt: new Date(),
+      },
+    });
+    console.log(`[seed] admin ${ADMIN_EMAIL} already exists — role/status reaffirmed.`);
+  } else {
+    await prisma.user.create({
+      data: {
+        email: ADMIN_EMAIL,
+        name: ADMIN_NAME,
+        passwordHash: null,
+        role: "admin",
+        status: "approved",
+        approvedAt: new Date(),
+      },
+    });
+    console.log(
+      `[seed] created admin ${ADMIN_EMAIL}. Sign in once at /login with any 8+ char password — that first password gets hashed in and reused on every later sign-in.`
+    );
   }
 
   await prisma.$disconnect();
