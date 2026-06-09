@@ -14,6 +14,11 @@ model User {
   // bcrypt hash; nullable for now so the JSON-profile migration can land
   // without backfilling passwords. Sprint 2.3 will require it.
   passwordHash String?
+  // Role-based authorization. "user" is the default; "admin" unlocks the
+  // /app/admin surface and the /api/admin/* endpoints. There is no UI for
+  // promoting users yet — flip the field in the DB (psql or Prisma Studio)
+  // to grant admin access.
+  role         String    @default("user")
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   lastLoginAt  DateTime?

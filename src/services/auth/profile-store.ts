@@ -38,6 +38,18 @@ export class InvalidCredentialsError extends Error {
   }
 }
 
+/**
+ * Thrown when registration is attempted with an email that already has
+ * a profile. The message is intentionally safe to surface back to the
+ * caller — no stack frames, no DB internals.
+ */
+export class EmailAlreadyTakenError extends Error {
+  constructor() {
+    super("A profile already exists with this email.");
+    this.name = "EmailAlreadyTakenError";
+  }
+}
+
 function assertPasswordPolicy(password: string): void {
   if (typeof password !== "string" || password.length < MIN_PASSWORD_LENGTH) {
     throw new Error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
@@ -61,6 +73,7 @@ export type LocalProfile = {
   id: string;
   email: string;
   name: string;
+  role: string;
   createdAt: string;
   updatedAt: string;
   lastLoginAt: string;
@@ -134,6 +147,7 @@ type UserRow = {
   id: string;
   email: string;
   name: string;
+  role: string;
   createdAt: Date;
   updatedAt: Date;
   lastLoginAt: Date | null;
@@ -144,6 +158,7 @@ function userRowToProfile(row: UserRow): LocalProfile {
     id: row.id,
     email: row.email,
     name: row.name,
+    role: row.role,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     lastLoginAt: (row.lastLoginAt ?? row.updatedAt).toISOString(),
@@ -160,7 +175,7 @@ export async function registerLocalProfile(input: {
   const existing = await prisma.user.findUnique({ where: { email } });
 
   if (existing) {
-    throw new Error("A profile already exists with this email.");
+    throw new EmailAlreadyTakenError();
   }
 
   const passwordHash = await hashPassword(input.password);

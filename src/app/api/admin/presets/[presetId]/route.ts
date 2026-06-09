@@ -1,12 +1,29 @@
 import { NextResponse } from "next/server";
+
 import { prisma } from "@/lib/prisma";
-import { requireCurrentProfile } from "@/services/auth/session";
+import {
+  FORBIDDEN_ADMIN_REQUIRED,
+  ForbiddenError,
+  requireAdmin,
+} from "@/services/auth/admin";
+import { UNAUTHORIZED_PROFILE_SESSION } from "@/services/auth/session";
 
 type Params = { presetId: string };
 
-async function requireAdmin() {
-  const profile = await requireCurrentProfile();
-  return profile;
+function handleRouteError(scope: string, err: unknown): NextResponse {
+  if (err instanceof Error) {
+    if (err.message === UNAUTHORIZED_PROFILE_SESSION) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (err instanceof ForbiddenError || err.message === FORBIDDEN_ADMIN_REQUIRED) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+  }
+  console.error(`[${scope}]`, err);
+  return NextResponse.json(
+    { error: "The service is temporarily unavailable." },
+    { status: 500 }
+  );
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<Params> }) {
@@ -17,10 +34,7 @@ export async function GET(_req: Request, { params }: { params: Promise<Params> }
     if (!preset) return NextResponse.json({ error: "Not found" }, { status: 404 });
     return NextResponse.json({ preset });
   } catch (err) {
-    if (err instanceof Error && err.message === "Unauthorized") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    return NextResponse.json({ error: "Internal error" }, { status: 500 });
+    return handleRouteError("admin-presets/get", err);
   }
 }
 
@@ -38,17 +52,17 @@ export async function PUT(request: Request, { params }: { params: Promise<Params
         ...(description !== undefined && { description }),
         ...(category !== undefined && { category }),
         ...(settingsJson !== undefined && {
-          settingsJson: typeof settingsJson === "string" ? settingsJson : JSON.stringify(settingsJson),
+          settingsJson:
+            typeof settingsJson === "string"
+              ? settingsJson
+              : JSON.stringify(settingsJson),
         }),
       },
     });
 
     return NextResponse.json({ preset });
   } catch (err) {
-    if (err instanceof Error && err.message === "Unauthorized") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    return NextResponse.json({ error: "Internal error" }, { status: 500 });
+    return handleRouteError("admin-presets/update", err);
   }
 }
 
@@ -59,9 +73,6 @@ export async function DELETE(_req: Request, { params }: { params: Promise<Params
     await prisma.preset.delete({ where: { id: presetId } });
     return NextResponse.json({ ok: true });
   } catch (err) {
-    if (err instanceof Error && err.message === "Unauthorized") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    return NextResponse.json({ error: "Internal error" }, { status: 500 });
+    return handleRouteError("admin-presets/delete", err);
   }
 }

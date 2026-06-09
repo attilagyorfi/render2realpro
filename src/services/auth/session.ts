@@ -10,6 +10,7 @@ import {
 } from "@/services/auth/signed-session";
 
 export const AUTH_SESSION_COOKIE = "render2real_profile_id";
+export const UNAUTHORIZED_PROFILE_SESSION = "UNAUTHORIZED_PROFILE_SESSION";
 
 function baseCookieOptions() {
   return {
@@ -42,7 +43,7 @@ export async function requireCurrentProfile() {
   const profile = await getCurrentProfileFromSession();
 
   if (!profile) {
-    throw new Error("UNAUTHORIZED_PROFILE_SESSION");
+    throw new Error(UNAUTHORIZED_PROFILE_SESSION);
   }
 
   return profile;

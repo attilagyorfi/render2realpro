@@ -28,15 +28,22 @@ import { StatusDot } from "@/components/ui/status-dot";
 import { t, type Language } from "@/i18n";
 import { useAppPreferencesStore } from "@/store/app-preferences";
 
-const navigationItems = [
+type NavigationItem = {
+  href: string;
+  labelKey: string;
+  icon: typeof LayoutGrid;
+  adminOnly?: boolean;
+};
+
+const navigationItems: NavigationItem[] = [
   { href: "/app", labelKey: "common.dashboard", icon: LayoutGrid },
   { href: "/app/projects", labelKey: "dashboard.projects", icon: FolderKanban },
   { href: "/app/settings", labelKey: "common.settings", icon: Settings2 },
-  { href: "/app/admin", labelKey: "common.admin", icon: ShieldUser },
+  { href: "/app/admin", labelKey: "common.admin", icon: ShieldUser, adminOnly: true },
 ];
 
 type SessionResponse = {
-  profile: { id: string; email: string; name: string } | null;
+  profile: { id: string; email: string; name: string; role: string } | null;
 };
 
 export function AppFrame({
@@ -122,30 +129,36 @@ export function AppFrame({
               {/* App-internal navigation only when the visitor is actually
                   signed in. Showing Dashboard/Projects/Settings/Admin to a
                   signed-out visitor is misleading — they can't reach any of
-                  them anyway, and it clutters the auth-guard screen. */}
+                  them anyway, and it clutters the auth-guard screen.
+                  Admin-only items (e.g. /app/admin) are additionally
+                  hidden from non-admin sessions. */}
               {isAppRoute && session?.profile
-                ? navigationItems.map((item) => {
-                    const Icon = item.icon;
-                    const isActive =
-                      pathname === item.href || pathname.startsWith(`${item.href}/`);
+                ? navigationItems
+                    .filter(
+                      (item) => !item.adminOnly || session.profile?.role === "admin"
+                    )
+                    .map((item) => {
+                      const Icon = item.icon;
+                      const isActive =
+                        pathname === item.href || pathname.startsWith(`${item.href}/`);
 
-                    return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        className={buttonVariants({
-                          variant: isActive ? "secondary" : "ghost",
-                          size: "sm",
-                          className: isActive
-                            ? "surface-chip text-foreground shadow-sm"
-                            : "text-muted-foreground",
-                        })}
-                      >
-                        <Icon data-icon="inline-start" />
-                        {t(item.labelKey, language)}
-                      </Link>
-                    );
-                  })
+                      return (
+                        <Link
+                          key={item.href}
+                          href={item.href}
+                          className={buttonVariants({
+                            variant: isActive ? "secondary" : "ghost",
+                            size: "sm",
+                            className: isActive
+                              ? "surface-chip text-foreground shadow-sm"
+                              : "text-muted-foreground",
+                          })}
+                        >
+                          <Icon data-icon="inline-start" />
+                          {t(item.labelKey, language)}
+                        </Link>
+                      );
+                    })
                 : null}
             </nav>
 

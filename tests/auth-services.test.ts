@@ -25,6 +25,7 @@ describe("profile store helpers", () => {
           id: "profile-1",
           email: "demo@example.com",
           name: "Demo User",
+          role: "user",
           createdAt: "2026-04-23T10:00:00.000Z",
           updatedAt: "2026-04-23T10:00:00.000Z",
           lastLoginAt: "2026-04-23T10:00:00.000Z",
