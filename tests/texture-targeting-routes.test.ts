@@ -34,9 +34,12 @@ vi.mock("@/services/texture-targeting/texture-targeting-service", async () => {
   };
 });
 
+const applyMaterialInpainting = vi.fn();
+
 vi.mock("@/services/texture-targeting/texture-targeting-job-service", () => ({
   createTexturePreview,
   applyTexturePass,
+  applyMaterialInpainting,
 }));
 
 describe("texture targeting routes", () => {
@@ -113,39 +116,34 @@ describe("texture targeting routes", () => {
     );
   });
 
-  it("persists a texture pass on apply for authorized requests", async () => {
+  it("persists a texture edit on apply for authorized requests", async () => {
+    // Sprint F: the apply route now accepts the free-prompt material-edit
+    // payload (mask + prompt + strength) and delegates to
+    // applyMaterialInpainting, which talks to Fal.ai. We mock the
+    // service so the test never crosses the network.
     requireCurrentProfile.mockResolvedValue({ id: "profile-1" });
     imageAssetFindUnique.mockResolvedValue({ id: "asset-1", projectId: "project-1" });
     profileOwnsProject.mockResolvedValue(true);
-    applyTexturePass.mockResolvedValue({
+    applyMaterialInpainting.mockResolvedValue({
       generationLogId: "log-1",
       imageVersionId: "version-1",
-      versionType: "texture_pass",
-      status: "completed",
-      message: "Texture pass saved.",
     });
+
+    // A minimal but real-shaped base64 PNG: 8 transparent pixels. The
+    // route only checks the payload's length, not its image validity.
+    const fakeMaskPngBase64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==".repeat(2);
 
     const { POST } = await import("@/app/api/texture-targeting/apply/route");
     const response = (await POST(
       new Request("http://localhost/api/texture-targeting/apply", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           imageAssetId: "asset-1",
-          selectionMode: "click-select",
-          selectionInput: { x: 0.3, y: 0.4 },
-          materialPreset: "glass",
-          preserveGeometry: true,
-          preserveLighting: true,
-          preserveSurroundings: true,
-          selectionMask: {
-            id: "asset-1-click-select-mask",
-            selectionMode: "click-select",
-            bounds: { x: 0.2, y: 0.3, width: 0.24, height: 0.18 },
-            coverage: 0.043,
-          },
+          mask: `data:image/png;base64,${fakeMaskPngBase64}`,
+          prompt: "red metal roof",
+          strength: 0.85,
         }),
       })
     )) as Response;
@@ -153,10 +151,16 @@ describe("texture targeting routes", () => {
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toEqual(
       expect.objectContaining({
-        texturePass: expect.objectContaining({
+        textureEdit: expect.objectContaining({
           imageVersionId: "version-1",
-          versionType: "texture_pass",
         }),
+      })
+    );
+    expect(applyMaterialInpainting).toHaveBeenCalledWith(
+      expect.objectContaining({
+        imageAssetId: "asset-1",
+        prompt: "red metal roof",
+        strength: 0.85,
       })
     );
   });
