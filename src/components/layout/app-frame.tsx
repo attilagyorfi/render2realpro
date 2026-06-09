@@ -4,10 +4,11 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  Clock,
   FolderKanban,
-  Home,
   Languages,
   LayoutGrid,
+  Plug,
   Settings2,
   ShieldUser,
 } from "lucide-react";
@@ -40,6 +41,8 @@ type NavigationItem = {
 const navigationItems: NavigationItem[] = [
   { href: "/app", labelKey: "common.dashboard", icon: LayoutGrid },
   { href: "/app/projects", labelKey: "dashboard.projects", icon: FolderKanban },
+  { href: "/app/providers", labelKey: "common.providers", icon: Plug },
+  { href: "/app/history", labelKey: "common.history", icon: Clock },
   { href: "/app/settings", labelKey: "common.settings", icon: Settings2 },
   { href: "/app/admin", labelKey: "common.admin", icon: ShieldUser, adminOnly: true },
 ];
@@ -96,13 +99,20 @@ export function AppFrame({
       <header className="sticky top-0 z-30 border-b border-[color:var(--border-subtle)]/80 bg-[color:color-mix(in_srgb,var(--bg-base)_86%,transparent)] backdrop-blur-xl">
         <div className="mx-auto flex w-full max-w-[1680px] items-center justify-between gap-6 px-6 py-4">
           <div className="flex items-center gap-3 min-w-0">
-            {/* Logo — decorative only inside the app (not clickable) */}
-            <div className="flex items-center gap-2.5 shrink-0">
+            {/* Logo links to /app — gives signed-in users an obvious way
+                back to the dashboard. Signed-out visitors who somehow land
+                on an /app/* URL get bounced to /login by the guard, so
+                this never accidentally signs them out. */}
+            <Link
+              href="/app"
+              className="flex items-center gap-2.5 shrink-0 transition hover:opacity-80"
+              aria-label={BRAND.name}
+            >
               <Image src="/logo.png" alt={BRAND.name} width={30} height={30} className="rounded-lg" />
               <span className="hidden font-heading text-sm font-semibold tracking-tight text-foreground md:block">
                 {BRAND.name}
               </span>
-            </div>
+            </Link>
             <div className="h-5 w-px bg-white/10 hidden md:block" />
             <div className="flex min-w-0 flex-col">
               <span className="text-[0.68rem] uppercase tracking-[0.28em] text-muted-foreground">
@@ -115,25 +125,17 @@ export function AppFrame({
           </div>
           <div className="flex items-center gap-2">
             <nav className="hidden items-center gap-2 md:flex">
-              {/* Home is always visible so the user can leave the app shell. */}
-              <Link
-                href="/"
-                className={buttonVariants({
-                  variant: "ghost",
-                  size: "sm",
-                  className: "text-muted-foreground",
-                })}
-              >
-                <Home data-icon="inline-start" />
-                {t("common.home", language)}
-              </Link>
-
               {/* App-internal navigation only when the visitor is actually
                   signed in. Showing Dashboard/Projects/Settings/Admin to a
                   signed-out visitor is misleading — they can't reach any of
                   them anyway, and it clutters the auth-guard screen.
                   Admin-only items (e.g. /app/admin) are additionally
-                  hidden from non-admin sessions. */}
+                  hidden from non-admin sessions.
+
+                  A "Home" entry that pointed at "/" used to live here, but
+                  that quietly logged signed-in users out of the app shell
+                  whenever they thought it'd take them to the dashboard.
+                  Use the logo (top-left) to return to /app. */}
               {isAppRoute && session?.profile
                 ? navigationItems
                     .filter(
