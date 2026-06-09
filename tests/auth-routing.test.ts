@@ -21,15 +21,19 @@ describe("auth routing", () => {
     expect(resolveAuthRedirect("/app/projects/demo", false)).toBe("/login");
   });
 
-  it("redirects authenticated auth-page requests into the app", () => {
-    expect(resolveAuthRedirect("/login", true)).toBe("/app");
-    expect(resolveAuthRedirect("/register", true)).toBe("/app");
+  it("never redirects /login or /register away — even with a session cookie", () => {
+    // Old behaviour bounced signed-in cookies to /app, but the middleware
+    // can't verify the HMAC, so a stale cookie produced a redirect trap
+    // (audit 8.4.1). The auth pages are now always reachable.
+    expect(resolveAuthRedirect("/login", true)).toBeNull();
+    expect(resolveAuthRedirect("/register", true)).toBeNull();
+    expect(resolveAuthRedirect("/login", false)).toBeNull();
+    expect(resolveAuthRedirect("/register", false)).toBeNull();
   });
 
   it("leaves public and already-correct requests alone", () => {
     expect(resolveAuthRedirect("/", false)).toBeNull();
     expect(resolveAuthRedirect("/preview", false)).toBeNull();
     expect(resolveAuthRedirect("/app", true)).toBeNull();
-    expect(resolveAuthRedirect("/login", false)).toBeNull();
   });
 });
