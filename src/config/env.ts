@@ -52,6 +52,21 @@ export const appEnv = {
   render2realApiUrl: process.env.RENDER2REAL_API_URL ?? "http://localhost:8000",
   // Fal.ai API key, consumed directly by fal-provider.ts.
   falKey: process.env.FAL_KEY ?? "",
+  // Public origin used to build absolute URLs inside transactional
+  // emails (e.g. the approval link). Falls back to https://formaveris.hu
+  // for production safety; in development, override to http://localhost:3000.
+  siteUrl: process.env.NEXT_PUBLIC_SITE_URL ?? "https://formaveris.hu",
+  // Resend API key. When unset, the email service drops to a console
+  // fallback that prints the email body + any links to stdout, so the
+  // registration flow remains testable without a provider.
+  resendApiKey: process.env.RESEND_API_KEY ?? "",
+  // Address used as the "From" header on every transactional email.
+  // Should be on a verified Resend domain in production.
+  emailFrom: process.env.EMAIL_FROM ?? "FormaVeris <noreply@formaveris.hu>",
+  // Where the registration notifications go. Defaults match the
+  // platform operator (see prisma/seed.js — the seeded admin user
+  // uses the same address).
+  adminNotifyEmail: process.env.ADMIN_NOTIFY_EMAIL ?? "info@g2amarketing.hu",
   // HMAC secret for signed session cookies; lazy so a misconfigured prod
   // build fails on the first cookie verify rather than on module load.
   get sessionSecret(): string {
