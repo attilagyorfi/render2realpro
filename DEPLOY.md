@@ -1,4 +1,4 @@
-# Deploying Render2Real Pro to Railway
+# Deploying FormaVeris to Railway
 
 This guide walks through a from-scratch Railway deploy: web service +
 Postgres + persistent volume + custom domain + first-run migrations.

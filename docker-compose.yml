@@ -1,4 +1,4 @@
-# Local development stack for Render2Real Pro.
+# Local development stack for FormaVeris.
 #
 # Starts a single Postgres 16 instance on port 5432, with a named volume
 # so data persists across `docker compose down`. Production uses Railway

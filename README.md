@@ -1,6 +1,6 @@
-# Render2Real Pro
+# FormaVeris
 
-Render2Real Pro is an architectural image workflow for **M Mérnöki Iroda Kft.** It helps architects, engineers, and visualization specialists upload architectural renders and run a realism-enhancement workflow that preserves the original composition exactly.
+FormaVeris is an architectural image workflow for **M Mérnöki Iroda Kft.** It helps architects, engineers, and visualization specialists upload architectural renders and run a realism-enhancement workflow that preserves the original composition exactly. (The GitHub repo still lives at `render2realpro` — that's the project's working repo name; the shipping product is FormaVeris.)
 
 ## Core rule
 
