@@ -1,6 +1,14 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
+// Load .env so DATABASE_URL is available when this script is run via
+// `node prisma/seed.js` (not just via `prisma db seed`, which loads it
+// automatically). dotenv is already on disk as a transitive dependency
+// of Prisma, so no extra install is required.
+require("dotenv").config();
+
 if (!process.env.DATABASE_URL) {
-  process.env.DATABASE_URL = "file:./dev.db";
+  throw new Error(
+    "DATABASE_URL is not set. Create a .env file from .env.example or export the variable before running this script."
+  );
 }
 
 const { PrismaClient } = require("@prisma/client");
