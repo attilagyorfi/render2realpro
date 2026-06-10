@@ -66,12 +66,16 @@ const DEFAULT_INFERENCE_STEPS = Number(process.env.FAL_INFERENCE_STEPS ?? "30");
  */
 const DEFAULT_GUIDANCE_SCALE = Number(process.env.FAL_GUIDANCE_SCALE ?? "3.5");
 /**
- * Canny ControlNet weights on Fal. Their own samples reference
- * `openai/controlnet-canny`; can be overridden via env if a better one
- * ships later.
+ * Canny ControlNet weights on Fal. Per the fal-general/image-to-image
+ * documented schema, controlnets[].path expects either a HuggingFace
+ * repo slug ("XLabs-AI/flux-controlnet-canny-v3") or a full URL to a
+ * weights file. The first revision shipped with "openai/controlnet-
+ * canny" — a value from Fal's own illustrative sample that turns out
+ * not to be a real repo slug and 422'd. The real XLabs Canny is the
+ * stable choice; override via env if a better one ships later.
  */
 const DEFAULT_CONTROL_PATH =
-  process.env.FAL_CONTROL_PATH ?? "openai/controlnet-canny";
+  process.env.FAL_CONTROL_PATH ?? "XLabs-AI/flux-controlnet-canny-v3";
 
 let configured = false;
 
@@ -165,6 +169,13 @@ export class FalAiProvider implements ProviderAdapter {
     );
 
     // ── 4. Call Fal.ai — image-to-image with a Canny ControlNet ───────────
+    // The controlnets entry uses only the three schema-documented
+    // fields (path / control_image_url / conditioning_scale). Earlier
+    // we passed start_percentage and end_percentage too — the
+    // documented schema doesn't accept them and the endpoint 422'd on
+    // the unknown keys. Without those keys the ControlNet just stays
+    // active for the whole denoising pass, which is what we want
+    // anyway.
     const result = (await fal.subscribe(DEFAULT_MODEL, {
       input: {
         prompt,
@@ -173,19 +184,19 @@ export class FalAiProvider implements ProviderAdapter {
         image_size: imageSize,
         num_inference_steps: DEFAULT_INFERENCE_STEPS,
         guidance_scale: DEFAULT_GUIDANCE_SCALE,
-        // Canny ControlNet pinned at the same URL — Fal generates the
-        // edge map server-side from the control_image_url.
+        negative_prompt:
+          "redesigned building, different roof material, repainted facade, " +
+          "new vehicles, new people, different camera angle, indoor scene, " +
+          "fantasy architecture, cartoon style, illustration, low quality, " +
+          "extra elements, missing elements",
         controlnets: [
           {
             path: DEFAULT_CONTROL_PATH,
             control_image_url: sourceUrl,
             conditioning_scale: DEFAULT_CONTROL_WEIGHT,
-            start_percentage: 0,
-            end_percentage: 1,
           },
         ],
         num_images: 1,
-        enable_safety_checker: false,
         output_format: "jpeg",
       },
       logs: false,
