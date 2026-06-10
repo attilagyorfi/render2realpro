@@ -1,25 +1,33 @@
 /**
  * fal-provider.ts
  *
- * Direct integration with the Fal.ai Flux ControlNet Canny endpoint.
- * Replaces the previous proxy-through-FastAPI design — the only external
- * dependency required now is Fal.ai itself (FAL_KEY env variable).
+ * Realism-pass adapter for Fal.ai. The previous revision used
+ * fal-ai/flux-pro/v1/canny (a pure Canny→image text-to-image endpoint),
+ * which only sees the EDGE MAP of the source — not the source pixels.
+ * Without the original textures as a visual reference, the model
+ * routinely hallucinated different materials and even reinterpreted
+ * exteriors as interiors. No amount of prompt-engineering can fix that
+ * class of problem when the source pixels never reach the model.
  *
- * Pipeline:
- *   1. Read source image (path-traversal checked).
- *   2. Upload source bytes to Fal storage → returns a CDN URL.
- *   3. Call FAL_MODEL (default fal-ai/flux-pro/v1/canny) with the URL
- *      as the control image plus the architectural-preservation prompt.
- *      The model runs its own Canny preprocessor server-side, so no
- *      local edge detection is required.
- *   4. Download the generated image from the returned URL.
- *   5. Persist it under storageRoot via writeGeneratedVersionBuffer.
+ * This revision moves to fal-ai/flux-general/image-to-image, which
+ * accepts BOTH the source image AND a Canny ControlNet at the same
+ * time:
  *
- * Tunables (all overridable via env so we can iterate without redeploying):
- *   FAL_MODEL                        default "fal-ai/flux-pro/v1/canny"
- *   FAL_CONTROL_WEIGHT               default 0.75 (structural adherence)
- *   FAL_INFERENCE_STEPS              default 28
- *   FAL_GUIDANCE_SCALE               default 3.5
+ *   - image_url            → the source render, given to the model as
+ *                            its base. The model now SEES the actual
+ *                            white-concrete tones, the metal cladding,
+ *                            the asphalt — not just outlines.
+ *   - strength             → how aggressively the model is allowed to
+ *                            deviate from the source pixels. 0.4 is the
+ *                            architectural sweet spot: enough denoise
+ *                            to add real material micro-detail, not so
+ *                            much that materials get reinvented.
+ *   - controlnets[Canny]   → keeps the geometry locked down even at the
+ *                            small amount of denoise we DO allow.
+ *
+ * The prompt also gets dramatically shorter. With the image-to-image
+ * pipeline, the model already knows what's in the scene; we don't need
+ * a 200-word preservation contract anymore.
  */
 
 import path from "path";
@@ -37,24 +45,33 @@ import type {
   ProviderGenerateResult,
 } from "./provider-adapter";
 
-const DEFAULT_MODEL = process.env.FAL_MODEL ?? "fal-ai/flux-pro/v1/canny";
-// How tightly the model must follow the Canny edge map. At 0.5 the model
-// took too many liberties and started reinterpreting an industrial
-// exterior as a wood-clad interior. 0.75 brings the geometry back —
-// edges become near-mandatory — at the cost of slightly less material
-// invention. The "Magas" generation-quality button bumps this further
-// up in the quality-tuning logic below.
-const DEFAULT_CONTROL_WEIGHT = Number(process.env.FAL_CONTROL_WEIGHT ?? "0.75");
-// More inference steps trade a few seconds of latency for visibly sharper
-// materials and lighting; 40 is the practical ceiling before diminishing
-// returns on Flux Pro v1.
-const DEFAULT_INFERENCE_STEPS = Number(process.env.FAL_INFERENCE_STEPS ?? "40");
-// Guidance pushes the model toward the prompt's photographic language.
-// 7 was sending it too hard toward magazine-photography aesthetics
-// (carved wood, soft daylight) which then conflicted with the source
-// render's geometry. 4.5 lets the prompt steer the materials without
-// overriding the structural cues from the Canny edge map.
-const DEFAULT_GUIDANCE_SCALE = Number(process.env.FAL_GUIDANCE_SCALE ?? "4.5");
+const DEFAULT_MODEL =
+  process.env.FAL_MODEL ?? "fal-ai/flux-general/image-to-image";
+/**
+ * How much of the source the model is allowed to overwrite. 0.4 means
+ * "keep 60% of the source signal, repaint 40% with photoreal detail".
+ * Going below 0.3 makes the change invisible; going above 0.6 starts
+ * letting the model reinvent materials.
+ */
+const DEFAULT_STRENGTH = Number(process.env.FAL_STRENGTH ?? "0.4");
+/**
+ * Canny ControlNet conditioning weight. 0.65 is firm without being so
+ * rigid that the soft-denoise can't add material detail at all.
+ */
+const DEFAULT_CONTROL_WEIGHT = Number(process.env.FAL_CONTROL_WEIGHT ?? "0.65");
+const DEFAULT_INFERENCE_STEPS = Number(process.env.FAL_INFERENCE_STEPS ?? "30");
+/**
+ * Lower guidance now that the source image is the model's anchor —
+ * the prompt only needs to whisper "photoreal" rather than shout it.
+ */
+const DEFAULT_GUIDANCE_SCALE = Number(process.env.FAL_GUIDANCE_SCALE ?? "3.5");
+/**
+ * Canny ControlNet weights on Fal. Their own samples reference
+ * `openai/controlnet-canny`; can be overridden via env if a better one
+ * ships later.
+ */
+const DEFAULT_CONTROL_PATH =
+  process.env.FAL_CONTROL_PATH ?? "openai/controlnet-canny";
 
 let configured = false;
 
@@ -126,33 +143,20 @@ export class FalAiProvider implements ProviderAdapter {
     const sourceUrl = await fal.storage.upload(sourceFile);
 
     // ── 3. Build prompt ────────────────────────────────────────────────────
-    // The previous version of this builder led with magazine-photography
-    // vocabulary ("oak wood", "Hasselblad", "interior light") and pushed
-    // the preservation contract to the tail. With ControlNet at 0.5 that
-    // produced outputs that broadly ignored the source — e.g. an
-    // industrial exterior turned into a wood-clad interior. Flux weighs
-    // the front of the prompt the hardest, so the preservation contract
-    // now goes FIRST; the photographic vocabulary comes after, only to
-    // dress what the geometry already dictates.
+    // Now that the model has the source pixels AND a Canny ControlNet,
+    // the prompt's job is to add intent ("photoreal exterior, slight
+    // material refinement"), not to enforce preservation. The Canny
+    // controlnet + low strength handle preservation structurally.
     const promptParts: string[] = [
-      // 1) Preserve, loud and early.
-      "Photorealistic rendering of the EXACT scene shown in the control image. Preserve the original camera angle, perspective, framing, and field of view bit-for-bit.",
-      "Preserve every architectural element exactly as drawn: building footprint, facade geometry, window positions, column spacing, roof shape, vehicles, vegetation, ground surfaces.",
-      "Do NOT redesign the building. Do NOT change interior vs. exterior. Do NOT reinterpret the scene as something different.",
-      // 2) THEN the realism upgrade — but only on what's already there.
-      "Upgrade the existing surfaces to photoreal materials: weathered concrete or precast panels for the building, asphalt or compacted gravel for the ground, real metal cladding where the render shows metal, glass with subtle reflections only where windows already exist.",
-      "Natural outdoor daylight from the same direction as the source, soft contact shadows, atmospheric haze in the distance, professional architectural exterior photography.",
+      "Photorealistic architectural exterior photography, professional reference photo of an existing building, true-to-source materials, natural outdoor daylight, accurate contact shadows, atmospheric haze.",
+      "Subtly improve surface textures and lighting realism while keeping every building element, vehicle, vegetation, and material exactly as in the source.",
     ];
     if (input.prompt.presetName && input.prompt.presetName !== "custom") {
-      promptParts.push(`Style preset: ${input.prompt.presetName}.`);
+      promptParts.push(`Preset: ${input.prompt.presetName}.`);
     }
     if (input.prompt.customDirectives?.length) {
       promptParts.push(...input.prompt.customDirectives);
     }
-    promptParts.push(
-      // 3) Hard-negative cues for the failure modes we've actually seen.
-      "No interior. No indoor wood paneling. No skylights or roof openings that aren't in the source. No new vehicles, no new people, no extra buildings, no fantasy elements, no flat shading, no 3D-render look, no cartoon style."
-    );
     const prompt = promptParts.join(" ");
 
     const imageSize = pickImageSize(
@@ -160,15 +164,26 @@ export class FalAiProvider implements ProviderAdapter {
       input.sourceHeight ?? 768
     );
 
-    // ── 4. Call Fal.ai (subscribe waits for the queue to complete) ─────────
+    // ── 4. Call Fal.ai — image-to-image with a Canny ControlNet ───────────
     const result = (await fal.subscribe(DEFAULT_MODEL, {
       input: {
         prompt,
-        control_image_url: sourceUrl,
+        image_url: sourceUrl,
+        strength: DEFAULT_STRENGTH,
         image_size: imageSize,
         num_inference_steps: DEFAULT_INFERENCE_STEPS,
         guidance_scale: DEFAULT_GUIDANCE_SCALE,
-        controlnet_conditioning_scale: DEFAULT_CONTROL_WEIGHT,
+        // Canny ControlNet pinned at the same URL — Fal generates the
+        // edge map server-side from the control_image_url.
+        controlnets: [
+          {
+            path: DEFAULT_CONTROL_PATH,
+            control_image_url: sourceUrl,
+            conditioning_scale: DEFAULT_CONTROL_WEIGHT,
+            start_percentage: 0,
+            end_percentage: 1,
+          },
+        ],
         num_images: 1,
         enable_safety_checker: false,
         output_format: "jpeg",
@@ -198,7 +213,7 @@ export class FalAiProvider implements ProviderAdapter {
     const saved = await writeGeneratedVersionBuffer({
       projectId: input.projectId,
       sourcePath: input.sourcePath,
-      versionLabel: "fal-controlnet-realism-pass",
+      versionLabel: "fal-img2img-realism-pass",
       bytes: generatedBytes,
     });
 
@@ -208,12 +223,14 @@ export class FalAiProvider implements ProviderAdapter {
         provider: this.name,
         model: DEFAULT_MODEL,
         promptUsed: prompt,
-        seed: result.data?.seed ?? null,
-        timings: result.data?.timings ?? null,
+        strength: DEFAULT_STRENGTH,
+        controlPath: DEFAULT_CONTROL_PATH,
         controlnetWeight: DEFAULT_CONTROL_WEIGHT,
         inferenceSteps: DEFAULT_INFERENCE_STEPS,
         guidanceScale: DEFAULT_GUIDANCE_SCALE,
         imageSize,
+        seed: result.data?.seed ?? null,
+        timings: result.data?.timings ?? null,
         generatedUrl: generated.url,
         generatedWidth: generated.width ?? null,
         generatedHeight: generated.height ?? null,

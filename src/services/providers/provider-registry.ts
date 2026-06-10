@@ -7,7 +7,7 @@ type ProviderEnvOverride = {
   openAiImageModel?: string;
 };
 
-const FAL_MODEL = process.env.FAL_MODEL ?? "fal-ai/flux-pro/v1/canny";
+const FAL_MODEL = process.env.FAL_MODEL ?? "fal-ai/flux-general/image-to-image";
 
 /**
  * The Fal provider now talks to Fal.ai directly via @fal-ai/client, so the
