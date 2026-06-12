@@ -308,10 +308,23 @@ function ZoomableImagePanel({
 
 // ─── Loading overlay ──────────────────────────────────────────────────────────
 
-function GeneratingOverlay({ language, startedAt, quality = "medium" }: { language: string; startedAt: number; quality?: "low" | "medium" | "high" }) {
-  // Heuristic progress: GPT Image 2 quality-based timing
-  // Flux Canny Pro typical timing: low ~90s, medium ~150s, high ~210s
-  const ESTIMATED_TOTAL_MS = quality === "low" ? 90_000 : quality === "high" ? 210_000 : 150_000;
+function GeneratingOverlay({
+  language,
+  startedAt,
+  quality = "medium",
+  onCancel,
+}: {
+  language: string;
+  startedAt: number;
+  quality?: "low" | "medium" | "high";
+  onCancel?: () => void;
+}) {
+  // Heuristic progress, calibrated to the flux-general/image-to-image
+  // pipeline measured via scripts/fal-smoke-test.js: ~7s model time
+  // plus upload/download overhead. The old values (90–210s) were tuned
+  // for the long-dead Canny text-to-image path and made the bar look
+  // stuck at 95% for minutes (2026-06-12 audit P0.6).
+  const ESTIMATED_TOTAL_MS = quality === "low" ? 15_000 : quality === "high" ? 40_000 : 25_000;
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
@@ -387,6 +400,17 @@ function GeneratingOverlay({ language, startedAt, quality = "medium" }: { langua
               : (language === "hu" ? "Befejezés hamarosan…" : "Finishing up…")}
           </p>
         </div>
+        {onCancel ? (
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            onClick={onCancel}
+            className="mt-2"
+          >
+            {language === "hu" ? "Mégse" : "Cancel"}
+          </Button>
+        ) : null}
       </div>
     </motion.div>
   );
@@ -487,6 +511,10 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
   const exportQuality = 92;
   const [exportScale, setExportScale] = useState<1 | 2 | 4>(1);
   const [controlsCollapsed, setControlsCollapsed] = useState(false);
+  // Below xl the 3-column grid can't fit, so panels render one at a time
+  // behind this switcher. Desktop (xl+) ignores it entirely.
+  // (2026-06-12 audit P0.3 — the right panel was unreachable on mobile.)
+  const [mobilePanel, setMobilePanel] = useState<"files" | "canvas" | "controls">("canvas");
   const [customPromptEnabled, setCustomPromptEnabled] = useState(false);
   const [customPromptText, setCustomPromptText] = useState("");
   const [generationFallback, setGenerationFallback] = useState<{
@@ -640,9 +668,16 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
     );
   }, [activePresetId, presets, setEditorValue, customPromptEnabled]);
 
+  // Lets the user bail out of a hung generation. Aborting only cancels
+  // the CLIENT request — a generation already running on the server
+  // finishes and lands in the version history; the cancel unblocks the UI.
+  const generateAbortRef = useRef<AbortController | null>(null);
+
   const generateMutation = useMutation({
-    mutationFn: (providerOverride?: string) =>
-      fetchJson<{
+    mutationFn: (providerOverride?: string) => {
+      const controller = new AbortController();
+      generateAbortRef.current = controller;
+      return fetchJson<{
         generation: {
           generationLogId: string;
           imageVersionId: string;
@@ -651,6 +686,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
       }>("/api/generations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           imageAssetId: selectedAsset?.id,
           presetId: customPromptEnabled ? undefined : activePresetId,
@@ -658,7 +694,8 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
           providerOverride,
           settingsOverride: { enableUpscaling, quality: generationQuality },
         }),
-      }),
+      });
+    },
     onMutate: () => {
       setGenerationFallback(null);
       setGenerationStartedAt(Date.now());
@@ -692,6 +729,24 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
       }
     },
     onError: (error) => {
+      // User-initiated cancel — neutral feedback, not an error state.
+      if (error instanceof DOMException && error.name === "AbortError") {
+        if (selectedAsset) {
+          upsertQueueEntry({
+            id: selectedAsset.id,
+            label: selectedAsset.originalFileName,
+            progress: 100,
+            status: "failed",
+            message: language === "hu" ? "Megszakítva" : "Cancelled",
+          });
+        }
+        toast.info(
+          language === "hu"
+            ? "Generálás megszakítva. Ha a szerver már dolgozott rajta, az eredmény megjelenik a verzióelőzményekben."
+            : "Generation cancelled. If the server already finished, the result will appear in the version history."
+        );
+        return;
+      }
       if (error instanceof ApiError) {
         setGenerationFallback({ message: error.message, retryable: Boolean(error.retryable), canFallbackToMock: Boolean(error.canFallbackToMock), fallbackProvider: error.fallbackProvider });
       }
@@ -699,6 +754,9 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
         upsertQueueEntry({ id: selectedAsset.id, label: selectedAsset.originalFileName, progress: 100, status: "failed", message: error instanceof Error ? error.message : t("workspace.generationFailed", language) });
       }
       toast.error(error instanceof Error ? error.message : t("workspace.generationFailed", language));
+    },
+    onSettled: () => {
+      generateAbortRef.current = null;
     },
   });
 
@@ -1044,15 +1102,45 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
       eyebrow={t("workspace.eyebrow", language)}
       title={project?.name ?? t("workspace.loadingTitle", language)}
     >
+      {/* Mobile panel switcher — only below xl, where the 3-column grid
+          can't fit and panels render one at a time. */}
+      <div className="mb-3 flex gap-1.5 rounded-full border border-white/10 bg-white/4 p-1 xl:hidden">
+        {(
+          [
+            ["files", "workspace.panelFiles"],
+            ["canvas", "workspace.panelCanvas"],
+            ["controls", "workspace.panelControls"],
+          ] as const
+        ).map(([panel, labelKey]) => (
+          <button
+            key={panel}
+            type="button"
+            onClick={() => setMobilePanel(panel)}
+            aria-pressed={mobilePanel === panel}
+            className={`flex-1 rounded-full px-3 py-2 text-xs font-medium transition ${
+              mobilePanel === panel
+                ? "bg-white/12 text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {t(labelKey, language)}
+          </button>
+        ))}
+      </div>
+
       <div
-        className={`grid h-[calc(100vh-9rem)] gap-4 ${
+        className={`grid h-[calc(100vh-12.5rem)] gap-4 xl:h-[calc(100vh-9rem)] ${
           controlsCollapsed
             ? "xl:grid-cols-[240px_minmax(0,1fr)]"
             : "xl:grid-cols-[240px_minmax(0,1fr)_340px]"
         }`}
       >
         {/* ── LEFT: Asset list ─────────────────────────────────────────────── */}
-        <Card className="surface-panel flex flex-col overflow-hidden">
+        <Card
+          className={`surface-panel flex-col overflow-hidden ${
+            mobilePanel === "files" ? "flex" : "hidden"
+          } xl:flex`}
+        >
           <CardHeader className="shrink-0 pb-3">
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm">{t("workspace.projectFiles", language)}</CardTitle>
@@ -1107,7 +1195,9 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
         <motion.section
           initial={{ opacity: 0, y: 18 }}
           animate={{ opacity: 1, y: 0 }}
-          className="surface-panel flex min-h-0 flex-col rounded-[32px] p-4"
+          className={`surface-panel min-h-0 flex-col rounded-[32px] p-4 ${
+            mobilePanel === "canvas" ? "flex" : "hidden"
+          } xl:flex`}
         >
           {/* Toolbar */}
           <div className="flex flex-wrap items-center gap-2 border-b border-white/8 pb-4">
@@ -1326,7 +1416,14 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
             {/* ── ORIGINAL IMAGE (top) — always shows the original render, no filter ─── */}
             <div className="relative min-h-0 flex-1">
               <AnimatePresence>
-                {isGenerating && <GeneratingOverlay language={language} startedAt={generationStartedAt} quality={generationQuality} />}
+                {isGenerating && (
+                  <GeneratingOverlay
+                    language={language}
+                    startedAt={generationStartedAt}
+                    quality={generationQuality}
+                    onCancel={() => generateAbortRef.current?.abort()}
+                  />
+                )}
               </AnimatePresence>
               {isLoading ? (
                 <div className="h-full rounded-[28px] bg-white/5 animate-pulse" />
@@ -1387,9 +1484,16 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
           </div>
         </motion.section>
 
-        {/* ── RIGHT: Controls panel ─────────────────────────────────────────── */}
-        {!controlsCollapsed ? (
-          <Card className="surface-panel min-h-0">
+        {/* ── RIGHT: Controls panel ─────────────────────────────────────────────
+            controlsCollapsed only governs the DESKTOP layout — on mobile the
+            panel switcher is the single source of truth, otherwise a panel
+            collapsed on desktop would leave the mobile "Controls" tab empty. */}
+        {!controlsCollapsed || mobilePanel === "controls" ? (
+          <Card
+            className={`surface-panel min-h-0 ${
+              mobilePanel === "controls" ? "block" : "hidden"
+            } ${controlsCollapsed ? "xl:hidden" : "xl:block"}`}
+          >
             <CardHeader className="border-b border-white/8 pb-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -1678,8 +1782,8 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                       {generationQuality === "low"
                         ? (language === "hu" ? "~15 másodperc" : "~15 seconds")
                         : generationQuality === "medium"
-                        ? (language === "hu" ? "~45 másodperc" : "~45 seconds")
-                        : (language === "hu" ? "~90 másodperc" : "~90 seconds")}
+                        ? (language === "hu" ? "~25 másodperc" : "~25 seconds")
+                        : (language === "hu" ? "~40 másodperc" : "~40 seconds")}
                     </div>
                   </div>
                   <Separator />
