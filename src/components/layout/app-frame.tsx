@@ -4,12 +4,9 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Clock,
   FolderKanban,
-  Languages,
   LayoutGrid,
   Menu,
-  Plug,
   Settings2,
   ShieldUser,
 } from "lucide-react";
@@ -21,21 +18,13 @@ import { toast } from "sonner";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Sheet,
   SheetContent,
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { StatusDot } from "@/components/ui/status-dot";
-import { t, type Language } from "@/i18n";
+import { t } from "@/i18n";
 import { useAppPreferencesStore } from "@/store/app-preferences";
 
 type NavigationItem = {
@@ -45,11 +34,12 @@ type NavigationItem = {
   adminOnly?: boolean;
 };
 
+// Providers and History no longer get their own nav entries — both moved
+// into Settings as sections (user feedback, 2026-06-12): neither carries
+// enough day-to-day information to justify top-level navigation.
 const navigationItems: NavigationItem[] = [
   { href: "/app", labelKey: "common.dashboard", icon: LayoutGrid },
   { href: "/app/projects", labelKey: "dashboard.projects", icon: FolderKanban },
-  { href: "/app/providers", labelKey: "common.providers", icon: Plug },
-  { href: "/app/history", labelKey: "common.history", icon: Clock },
   { href: "/app/settings", labelKey: "common.settings", icon: Settings2 },
   { href: "/app/admin", labelKey: "common.admin", icon: ShieldUser, adminOnly: true },
 ];
@@ -70,7 +60,6 @@ export function AppFrame({
   const pathname = usePathname();
   const router = useRouter();
   const language = useAppPreferencesStore((state) => state.language);
-  const setLanguage = useAppPreferencesStore((state) => state.setLanguage);
   const isAppRoute = pathname.startsWith("/app");
 
   const { data: session, isLoading: sessionLoading } = useQuery({
@@ -175,11 +164,12 @@ export function AppFrame({
 
             {isAppRoute && session?.profile ? (
               <>
+                {/* Name only — the email made the chip overly wide and is
+                    private-ish information that doesn't need to sit in the
+                    header permanently (user feedback, 2026-06-12). */}
                 <div className="surface-chip hidden items-center gap-2 rounded-full px-3 py-1.5 text-xs text-muted-foreground md:flex">
                   <StatusDot tone="success" />
-                  <span className="max-w-72 truncate">
-                    {session.profile.name} · {session.profile.email}
-                  </span>
+                  <span className="max-w-48 truncate">{session.profile.name}</span>
                 </div>
                 <Button
                   variant="outline"
@@ -192,18 +182,8 @@ export function AppFrame({
                 </Button>
               </>
             ) : null}
-            <Select value={language} onValueChange={(value) => setLanguage(value as Language)}>
-              <SelectTrigger size="sm" className="min-w-28">
-                <Languages data-icon="inline-start" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent align="end">
-                <SelectGroup>
-                  <SelectItem value="hu">Magyar</SelectItem>
-                  <SelectItem value="en">English</SelectItem>
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+            {/* The language selector used to live here; it moved to
+                Settings → Nyelv. Keeping the header lean. */}
 
             {/* Mobile menu — the desktop nav above is hidden below md and
                 previously had NO replacement, leaving signed-in phone users
@@ -261,7 +241,7 @@ export function AppFrame({
                     <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
                       <StatusDot tone="success" />
                       <span className="truncate">
-                        {session.profile.name} · {session.profile.email}
+                        {session.profile.name}
                       </span>
                     </div>
                     <Button
