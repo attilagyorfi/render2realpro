@@ -129,6 +129,24 @@ export class FalAiProvider implements ProviderAdapter {
     ensureConfigured();
     const startedAt = Date.now();
 
+    // Per-generation overrides arrive via settingsOverride →
+    // mergePresetSettings → input.prompt.settings. Two are honoured here:
+    //   creativity — the user-facing denoising strength (0.2 faithful …
+    //                0.85 bold). Exposed by the workspace "Kreativitás"
+    //                slider; falls back to the env-tuned default.
+    //   quality    — maps to inference steps (low/medium/high).
+    const settings = (input.prompt.settings ?? {}) as Record<string, unknown>;
+    const rawCreativity = Number(settings.creativity);
+    const strength = Number.isFinite(rawCreativity)
+      ? Math.min(0.85, Math.max(0.2, rawCreativity))
+      : DEFAULT_STRENGTH;
+    const steps =
+      settings.quality === "low"
+        ? 24
+        : settings.quality === "high"
+          ? 40
+          : DEFAULT_INFERENCE_STEPS;
+
     // ── 1. Read source image (path-traversal checked) ──────────────────────
     const imageBytes = await readStoredFile(input.sourcePath);
     const sourceExtension = path.extname(input.sourcePath).toLowerCase();
@@ -181,15 +199,20 @@ export class FalAiProvider implements ProviderAdapter {
       input: {
         prompt,
         image_url: sourceUrl,
-        strength: DEFAULT_STRENGTH,
+        strength,
         image_size: imageSize,
-        num_inference_steps: DEFAULT_INFERENCE_STEPS,
+        num_inference_steps: steps,
         guidance_scale: DEFAULT_GUIDANCE_SCALE,
+        // The watermark/text/logo bans exist because test renders sourced
+        // from stock sites carry diagonal watermarks — without the ban the
+        // model happily "enhances" the watermark into the output.
         negative_prompt:
           "redesigned building, different roof material, repainted facade, " +
           "new vehicles, new people, different camera angle, indoor scene, " +
           "fantasy architecture, cartoon style, illustration, low quality, " +
-          "extra elements, missing elements",
+          "extra elements, missing elements, " +
+          "watermark, stock photo watermark, sample text, letters, " +
+          "typography, captions, logo, signature, branding overlay",
         controlnets: [
           {
             path: DEFAULT_CONTROL_PATH,
@@ -235,10 +258,10 @@ export class FalAiProvider implements ProviderAdapter {
         provider: this.name,
         model: DEFAULT_MODEL,
         promptUsed: prompt,
-        strength: DEFAULT_STRENGTH,
+        strength,
         controlPath: DEFAULT_CONTROL_PATH,
         controlnetWeight: DEFAULT_CONTROL_WEIGHT,
-        inferenceSteps: DEFAULT_INFERENCE_STEPS,
+        inferenceSteps: steps,
         guidanceScale: DEFAULT_GUIDANCE_SCALE,
         imageSize,
         seed: result.data?.seed ?? null,
