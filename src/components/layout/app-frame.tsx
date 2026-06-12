@@ -8,6 +8,7 @@ import {
   FolderKanban,
   Languages,
   LayoutGrid,
+  Menu,
   Plug,
   Settings2,
   ShieldUser,
@@ -27,6 +28,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Sheet,
+  SheetContent,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { StatusDot } from "@/components/ui/status-dot";
 import { t, type Language } from "@/i18n";
 import { useAppPreferencesStore } from "@/store/app-preferences";
@@ -174,7 +181,13 @@ export function AppFrame({
                     {session.profile.name} · {session.profile.email}
                   </span>
                 </div>
-                <Button variant="outline" size="sm" type="button" onClick={signOut}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  onClick={signOut}
+                  className="hidden md:inline-flex"
+                >
                   {t("common.signOut", language)}
                 </Button>
               </>
@@ -191,6 +204,79 @@ export function AppFrame({
                 </SelectGroup>
               </SelectContent>
             </Select>
+
+            {/* Mobile menu — the desktop nav above is hidden below md and
+                previously had NO replacement, leaving signed-in phone users
+                with no way to move between Dashboard/Projects/Settings
+                (2026-06-12 audit P0.2). */}
+            {isAppRoute && session?.profile ? (
+              <Sheet>
+                <SheetTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label={t("common.menu", language)}
+                      className={
+                        buttonVariants({ variant: "ghost", size: "icon-sm" }) +
+                        " md:hidden"
+                      }
+                    />
+                  }
+                >
+                  <Menu />
+                </SheetTrigger>
+                <SheetContent
+                  side="top"
+                  className="bg-[#0a0d14] border-white/10 px-6 py-8"
+                >
+                  <SheetTitle className="text-xs uppercase tracking-[0.22em] text-muted-foreground">
+                    {t("common.navigation", language)}
+                  </SheetTitle>
+                  <nav className="mt-6 flex flex-col gap-2 text-base font-medium text-foreground">
+                    {navigationItems
+                      .filter(
+                        (item) => !item.adminOnly || session.profile?.role === "admin"
+                      )
+                      .map((item) => {
+                        const Icon = item.icon;
+                        const isActive =
+                          pathname === item.href || pathname.startsWith(`${item.href}/`);
+                        return (
+                          <Link
+                            key={item.href}
+                            href={item.href}
+                            className={`flex items-center gap-3 rounded-lg border px-4 py-3 transition ${
+                              isActive
+                                ? "border-white/20 bg-white/8 text-foreground"
+                                : "border-white/8 hover:bg-white/5"
+                            }`}
+                          >
+                            <Icon className="size-4 shrink-0" />
+                            {t(item.labelKey, language)}
+                          </Link>
+                        );
+                      })}
+                  </nav>
+                  <div className="mt-6 border-t border-white/10 pt-4">
+                    <div className="flex items-center gap-2 px-1 text-xs text-muted-foreground">
+                      <StatusDot tone="success" />
+                      <span className="truncate">
+                        {session.profile.name} · {session.profile.email}
+                      </span>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="lg"
+                      type="button"
+                      onClick={signOut}
+                      className="mt-3 w-full"
+                    >
+                      {t("common.signOut", language)}
+                    </Button>
+                  </div>
+                </SheetContent>
+              </Sheet>
+            ) : null}
           </div>
         </div>
       </header>
