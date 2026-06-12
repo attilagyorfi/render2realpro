@@ -34,12 +34,24 @@ export function ProjectCreateForm({ onCreated }: Props) {
   });
 
   const createProject = useMutation({
-    mutationFn: (values: ProjectFormValues) =>
-      fetchJson("/api/projects", {
+    mutationFn: (values: ProjectFormValues) => {
+      // Zero-friction create (user feedback, 2026-06-12): every field is
+      // optional. An empty name falls back to "Névtelen projekt — <date>"
+      // so the project starts instantly and can be renamed later from the
+      // projects list.
+      const fallbackName = `${t("project.defaultName", language)} — ${new Date().toLocaleString(
+        language === "hu" ? "hu-HU" : "en-US",
+        { dateStyle: "short", timeStyle: "short" }
+      )}`;
+      return fetchJson("/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(values),
-      }),
+        body: JSON.stringify({
+          ...values,
+          name: values.name?.trim() || fallbackName,
+        }),
+      });
+    },
     onSuccess: (data: unknown) => {
       form.reset();
       queryClient.invalidateQueries({ queryKey: ["projects"] });
@@ -63,7 +75,7 @@ export function ProjectCreateForm({ onCreated }: Props) {
       </CardHeader>
       <CardContent>
         <form className="flex flex-col gap-3" onSubmit={form.handleSubmit((values) => createProject.mutate(values))}>
-          <Input placeholder={t("project.namePlaceholder", language)} {...form.register("name", { required: true })} />
+          <Input placeholder={t("project.namePlaceholder", language)} {...form.register("name")} />
           <Input placeholder={t("project.clientPlaceholder", language)} {...form.register("clientName")} />
           <Textarea
             placeholder={t("project.descriptionPlaceholder", language)}

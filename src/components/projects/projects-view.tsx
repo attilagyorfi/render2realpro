@@ -3,11 +3,13 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
+import { toast } from "sonner";
 import {
   ArrowRight,
   FolderKanban,
+  Pencil,
   Plus,
   Clock,
   FileImage,
@@ -17,8 +19,9 @@ import {
 import { AppFrame } from "@/components/layout/app-frame";
 import { ProjectCreateForm } from "@/components/projects/project-create-form";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { t } from "@/i18n";
 import { fetchJson } from "@/lib/fetch-json";
 import { useAppPreferencesStore } from "@/store/app-preferences";
@@ -51,11 +54,33 @@ const stagger = {
 export function ProjectsView() {
   const language = useAppPreferencesStore((state) => state.language);
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [createOpen, setCreateOpen] = useState(false);
+  // Rename modal state — projects are created with default names now
+  // (zero-friction create), so renaming from the list is the expected
+  // second step of the flow.
+  const [renameTarget, setRenameTarget] = useState<{ id: string; name: string } | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   const { data, isLoading } = useQuery({
     queryKey: ["projects"],
     queryFn: () => fetchJson<ProjectsResponse>("/api/projects"),
+  });
+
+  const renameMutation = useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      fetchJson(`/api/projects/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      }),
+    onSuccess: () => {
+      toast.success(t("project.renamed", language));
+      setRenameTarget(null);
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+    },
+    onError: (error) =>
+      toast.error(error instanceof Error ? error.message : t("project.createError", language)),
   });
 
   const projects = data?.projects ?? [];
@@ -197,7 +222,14 @@ export function ProjectsView() {
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.35, delay: i * 0.06 }}
-                        className="surface-subtle flex flex-col gap-4 rounded-[24px] p-5 transition hover:bg-white/6 lg:flex-row lg:items-center lg:justify-between"
+                        role="link"
+                        tabIndex={0}
+                        aria-label={project.name}
+                        onClick={() => router.push(`/app/projects/${project.id}`)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") router.push(`/app/projects/${project.id}`);
+                        }}
+                        className="surface-subtle flex cursor-pointer flex-col gap-4 rounded-[24px] border border-transparent p-5 transition hover:-translate-y-0.5 hover:border-white/15 hover:bg-white/8 hover:shadow-lg lg:flex-row lg:items-center lg:justify-between"
                       >
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-3">
@@ -264,9 +296,24 @@ export function ProjectsView() {
                           </div>
                         )}
 
-                        <div className="flex shrink-0 items-center gap-3">
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            type="button"
+                            aria-label={t("project.rename", language)}
+                            title={t("project.rename", language)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setRenameTarget({ id: project.id, name: project.name });
+                              setRenameValue(project.name);
+                            }}
+                          >
+                            <Pencil className="size-3.5" />
+                          </Button>
                           <Link
                             href={`/app/projects/${project.id}`}
+                            onClick={(event) => event.stopPropagation()}
                             className={buttonVariants({ variant: "default", size: "default" })}
                           >
                             {t("project.open", language)}
@@ -282,6 +329,56 @@ export function ProjectsView() {
         </motion.div>
 
       </div>
+
+      {/* ── Rename modal ─────────────────────────────────────────────────── */}
+      {renameTarget ? (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onClick={() => setRenameTarget(null)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setRenameTarget(null);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("project.rename", language)}
+            className="w-full max-w-md rounded-[24px] border border-white/10 bg-[#0c1018] p-6 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="text-base font-semibold text-foreground">
+              {t("project.rename", language)}
+            </h2>
+            <Input
+              autoFocus
+              value={renameValue}
+              onChange={(event) => setRenameValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && renameValue.trim()) {
+                  renameMutation.mutate({ id: renameTarget.id, name: renameValue.trim() });
+                }
+              }}
+              className="mt-4"
+              placeholder={t("project.namePlaceholder", language)}
+            />
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="ghost" size="sm" type="button" onClick={() => setRenameTarget(null)}>
+                {t("common.cancel", language)}
+              </Button>
+              <Button
+                size="sm"
+                type="button"
+                disabled={!renameValue.trim() || renameMutation.isPending}
+                onClick={() =>
+                  renameMutation.mutate({ id: renameTarget.id, name: renameValue.trim() })
+                }
+              >
+                {t("common.save", language)}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </AppFrame>
   );
 }
