@@ -5,6 +5,11 @@ import {
   EmailAlreadyTakenError,
   registerLocalProfile,
 } from "@/services/auth/profile-store";
+import {
+  checkRateLimit,
+  clientIpFrom,
+  registerFailure,
+} from "@/services/auth/rate-limit";
 import { sendEmail } from "@/services/email/email-service";
 import {
   buildAdminNotification,
@@ -16,6 +21,13 @@ const registerSchema = z.object({
   name: z.string().min(2).max(120),
   password: z.string().min(8, "Password must be at least 8 characters."),
 });
+
+// Each successful registration fires an email to the platform admin, so
+// an unthrottled endpoint is a spam cannon. 3 registrations per IP per
+// hour is generous for legitimate use (one office registering a few
+// colleagues) while capping abuse.
+const MAX_REGISTRATIONS_PER_WINDOW = 3;
+const REGISTRATION_WINDOW_MS = 60 * 60 * 1000;
 
 /**
  * POST /api/auth/register
@@ -33,6 +45,23 @@ const registerSchema = z.object({
 export async function POST(request: Request) {
   try {
     const payload = registerSchema.parse(await request.json());
+
+    const rateKey = `register:${clientIpFrom(request)}`;
+    const verdict = checkRateLimit(
+      rateKey,
+      MAX_REGISTRATIONS_PER_WINDOW,
+      REGISTRATION_WINDOW_MS
+    );
+    if (!verdict.allowed) {
+      return NextResponse.json(
+        { error: "AUTH_RATE_LIMITED", retryAfterSeconds: verdict.retryAfterSeconds },
+        { status: 429, headers: { "Retry-After": String(verdict.retryAfterSeconds) } }
+      );
+    }
+    // Every accepted registration consumes one slot in the window —
+    // unlike login, where only failures count.
+    registerFailure(rateKey, REGISTRATION_WINDOW_MS);
+
     const { profile, approvalToken } = await registerLocalProfile(payload);
 
     // Fire both emails in parallel. Failures are logged but don't fail

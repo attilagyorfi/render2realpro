@@ -108,7 +108,9 @@ export function AuthFormCard({ mode }: { mode: AuthMode }) {
             ? t("auth.pendingAccount", language)
             : raw === "AUTH_ACCOUNT_REJECTED"
               ? t("auth.rejectedAccount", language)
-              : raw || t("auth.failed", language);
+              : raw === "AUTH_RATE_LIMITED"
+                ? t("auth.rateLimited", language)
+                : raw || t("auth.failed", language);
         throw new Error(mapped);
       }
 

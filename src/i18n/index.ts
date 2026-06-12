@@ -40,6 +40,8 @@ const en = {
   "common.createProfile": "Create profile",
   "common.home": "Home",
   "common.backToHome": "Back to home",
+  "common.menu": "Menu",
+  "common.navigation": "Navigation",
   "auth.needAccount": "Need a new profile?",
   "auth.haveAccount": "Already have a profile?",
   "auth.signInTitle": "Sign in",
@@ -65,6 +67,8 @@ const en = {
     "Your account is awaiting approval. We'll email you the moment it's reviewed.",
   "auth.rejectedAccount":
     "Your application was not approved. Please contact us if you believe this is a mistake.",
+  "auth.rateLimited":
+    "Too many attempts. Please wait a few minutes and try again.",
   "materialEdit.title": "Material editor",
   "materialEdit.promptPlaceholder":
     "What should this area become? e.g. red metal roof, weathered red brick wall…",
@@ -207,6 +211,9 @@ const en = {
   "workspace.exportFailed": "Unable to export file.",
   "workspace.hideControls": "Hide controls",
   "workspace.showControls": "Show controls",
+  "workspace.panelFiles": "Files",
+  "workspace.panelCanvas": "Canvas",
+  "workspace.panelControls": "Controls",
   "workspace.originalReference": "Original reference",
   "workspace.latestOutput": "Latest output",
   "workspace.generationRunning": "realism pass running",
@@ -313,6 +320,8 @@ const hu: Record<TranslationKey, string> = {
   "common.createProfile": "Profil létrehozása",
   "common.home": "Kezdőlap",
   "common.backToHome": "Vissza a főoldalra",
+  "common.menu": "Menü",
+  "common.navigation": "Navigáció",
   "auth.needAccount": "Még nincs profilod?",
   "auth.haveAccount": "Már van profilod?",
   "auth.signInTitle": "Belépés",
@@ -338,6 +347,8 @@ const hu: Record<TranslationKey, string> = {
     "A fiókod még jóváhagyásra vár. Amint elbíráljuk, e-mailben értesítünk.",
   "auth.rejectedAccount":
     "A jelentkezésedet sajnos elutasítottuk. Ha úgy gondolod, hogy ez tévedés, írj nekünk.",
+  "auth.rateLimited":
+    "Túl sok próbálkozás. Várj néhány percet, és próbáld újra.",
   "materialEdit.title": "Anyagszerkesztő",
   "materialEdit.promptPlaceholder":
     "Mire cseréljük ezt a területet? Pl. piros fémtető, kopott vörös téglafal…",
@@ -457,6 +468,9 @@ const hu: Record<TranslationKey, string> = {
   "workspace.exportFailed": "A fájl exportálása nem sikerült.",
   "workspace.hideControls": "Vezérlők elrejtése",
   "workspace.showControls": "Vezérlők megjelenítése",
+  "workspace.panelFiles": "Fájlok",
+  "workspace.panelCanvas": "Vászon",
+  "workspace.panelControls": "Vezérlők",
   "workspace.originalReference": "Eredeti referencia",
   "workspace.latestOutput": "Legfrissebb eredmény",
   "workspace.generationRunning": "realizmus-passz fut",
