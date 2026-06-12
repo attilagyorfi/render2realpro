@@ -66,16 +66,17 @@ const DEFAULT_INFERENCE_STEPS = Number(process.env.FAL_INFERENCE_STEPS ?? "30");
  */
 const DEFAULT_GUIDANCE_SCALE = Number(process.env.FAL_GUIDANCE_SCALE ?? "3.5");
 /**
- * Canny ControlNet weights on Fal. Per the fal-general/image-to-image
- * documented schema, controlnets[].path expects either a HuggingFace
- * repo slug ("XLabs-AI/flux-controlnet-canny-v3") or a full URL to a
- * weights file. The first revision shipped with "openai/controlnet-
- * canny" — a value from Fal's own illustrative sample that turns out
- * not to be a real repo slug and 422'd. The real XLabs Canny is the
- * stable choice; override via env if a better one ships later.
+ * Canny ControlNet weights on Fal. controlnets[].path expects a
+ * HuggingFace repo slug in DIFFUSERS format. Two earlier values failed
+ * in sequence: "openai/controlnet-canny" (Fal's illustrative sample,
+ * not a real repo → 422) and "XLabs-AI/flux-controlnet-canny-v3"
+ * (real repo but xlabs format, no config.json → pipeline load error
+ * after minutes of queueing). InstantX is the standard diffusers-format
+ * Flux Canny and is validated end-to-end via scripts/fal-smoke-test.js:
+ * ~7s runtime, geometry fully preserved on the reference render.
  */
 const DEFAULT_CONTROL_PATH =
-  process.env.FAL_CONTROL_PATH ?? "XLabs-AI/flux-controlnet-canny-v3";
+  process.env.FAL_CONTROL_PATH ?? "InstantX/FLUX.1-dev-Controlnet-Canny";
 
 let configured = false;
 
