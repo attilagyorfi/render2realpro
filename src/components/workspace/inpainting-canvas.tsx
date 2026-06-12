@@ -105,7 +105,12 @@ export function InpaintingCanvas({
   }, [imageUrl]);
 
   // ── Painting ─────────────────────────────────────────────────────────────
-  const getCanvasPos = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // Pointer events instead of mouse events so the brush works with
+  // mouse, touch, AND stylus — architects review on tablets, and the
+  // earlier mouse-only handlers made the whole editor dead on touch
+  // devices (2026-06-12 audit P0.4). touch-action: none on the canvas
+  // stops the browser from hijacking the drag for scrolling.
+  const getCanvasPos = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = maskCanvasRef.current!.getBoundingClientRect();
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   };
@@ -124,18 +129,25 @@ export function InpaintingCanvas({
     [brushSize]
   );
 
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    // Keep receiving move events even if the pointer wanders off the
+    // canvas mid-stroke (or the palm briefly lifts on touch).
+    e.currentTarget.setPointerCapture(e.pointerId);
     isPainting.current = true;
     const pos = getCanvasPos(e);
     paintAt(pos.x, pos.y, mode === "erase");
   };
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isPainting.current) return;
     const pos = getCanvasPos(e);
     paintAt(pos.x, pos.y, mode === "erase");
   };
-  const handleMouseUp = () => {
+  const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
     isPainting.current = false;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
   };
 
   const clearMask = () => {
@@ -367,11 +379,11 @@ export function InpaintingCanvas({
         <canvas
           ref={maskCanvasRef}
           className="absolute rounded cursor-crosshair"
-          style={{ imageRendering: "crisp-edges" }}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
+          style={{ imageRendering: "crisp-edges", touchAction: "none" }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
         />
         {isProcessing ? (
           <div className="absolute inset-0 flex items-center justify-center bg-background/60 rounded">
