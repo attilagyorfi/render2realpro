@@ -1237,22 +1237,14 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
 
             <div className="h-4 w-px bg-white/10" />
 
-            {/* Compare toggle — opens fullscreen comparison */}
+            {/* Compare toggle — inline now (R3). The canvas swaps between
+                the single image and the Before/After slider in place; the
+                fullscreen button beside it covers the dedicated review
+                workflow when the user wants the slider full-screen. */}
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                if (compareEnabled) {
-                  // If already enabled, toggle off
-                  startTransition(() => setCompareEnabled(false));
-                } else {
-                  // Enable compare and open fullscreen
-                  startTransition(() => {
-                    setCompareEnabled(true);
-                    setFullscreenOpen(true);
-                  });
-                }
-              }}
+              onClick={() => startTransition(() => setCompareEnabled(!compareEnabled))}
               disabled={!hasGeneratedVersion}
               className={compareEnabled ? "border-blue-500/40 bg-blue-500/10 text-blue-300" : ""}
             >
@@ -1422,27 +1414,26 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
               </div>
             ) : null}
 
-            {/* ── Fidelity badge + Inpainting button ─────────────────────── */}
-            {(lastFidelityScore || hasGeneratedVersion) && (
+            {/* ── Fidelity badge ─────────────────────────────────────────── */}
+            {lastFidelityScore && (
               <div className="flex items-center gap-2 mb-2">
-                {lastFidelityScore && (
-                  <FidelityBadge fidelity={lastFidelityScore} />
-                )}
-                {hasGeneratedVersion && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 text-xs gap-1.5 border-violet-500/30 bg-violet-500/10 text-violet-300 hover:bg-violet-500/20"
-                    onClick={() => setInpaintingOpen(true)}
-                  >
-                    <Paintbrush className="h-3 w-3" />
-                    {language === "hu" ? "Anyagszerkesztő" : "Material editor"}
-                  </Button>
-                )}
+                <FidelityBadge fidelity={lastFidelityScore} />
               </div>
             )}
 
-            {/* ── ORIGINAL IMAGE (top) — always shows the original render, no filter ─── */}
+            {/* ── SINGLE UNIFIED CANVAS (R3) ────────────────────────────────
+                The earlier vertical split (original on top, preview on
+                bottom) cut both images to half height and forced the eye
+                to scan up-and-down. The redesign uses one large canvas
+                that swaps between three states:
+                  • no asset           → placeholder
+                  • asset, no generated → original
+                  • asset + generated   → inline Before/After slider
+                                          (compareEnabled) OR generated
+                                          alone (compareEnabled=false).
+                The Material editor (Anyagszerkesztő) is now a floating
+                toolbar in the bottom-left corner so it stays accessible
+                without taking up a row of the canvas. */}
             <div className="relative min-h-0 flex-1">
               <AnimatePresence>
                 {isGenerating && (
@@ -1456,37 +1447,53 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
               </AnimatePresence>
               {isLoading ? (
                 <div className="h-full rounded-[28px] bg-white/5 animate-pulse" />
+              ) : hasGeneratedVersion && compareEnabled ? (
+                <ComparisonView
+                  before={originalVersion?.fileUrl ?? referenceUrl ?? ""}
+                  after={compareVersion?.fileUrl ?? displayUrl ?? ""}
+                  beforeLabel={language === "hu" ? "Eredeti render" : "Original render"}
+                  afterLabel={formatVersionLabel(compareVersion?.versionType ?? "realism", language)}
+                  className="h-full"
+                />
               ) : (
                 <ZoomableImagePanel
-                  src={originalVersion?.fileUrl ?? referenceUrl}
-                  alt={language === "hu" ? "Eredeti render" : "Original render"}
-                  label={language === "hu" ? "Eredeti render" : "Original render"}
+                  src={hasGeneratedVersion ? (compareVersion?.fileUrl ?? displayUrl) : (originalVersion?.fileUrl ?? referenceUrl)}
+                  alt={hasGeneratedVersion
+                    ? (language === "hu" ? "Előnézeti kép" : "Preview image")
+                    : (language === "hu" ? "Eredeti render" : "Original render")}
+                  label={hasGeneratedVersion
+                    ? (language === "hu" ? "Előnézeti kép" : "Preview image")
+                    : (language === "hu" ? "Eredeti render" : "Original render")}
+                  badge={
+                    hasGeneratedVersion ? (
+                      <Badge variant="outline" className="border-violet-500/30 bg-violet-500/10 text-violet-300 text-[0.6rem] px-1.5 py-0">
+                        {formatVersionLabel(compareVersion?.versionType ?? "realism", language)}
+                      </Badge>
+                    ) : undefined
+                  }
                   emptyText={language === "hu" ? "Tölts fel egy képet" : "Upload an image"}
+                  filterStyle={hasGeneratedVersion && presetEnabled ? filterStyle : undefined}
                   onFullscreen={() => setFullscreenOpen(true)}
                   className="h-full"
                 />
               )}
+
+              {/* Floating material-editor button (bottom-left). Only
+                  appears once there's a generated version to edit. */}
+              {hasGeneratedVersion && !isGenerating && (
+                <div className="absolute bottom-4 left-4 z-10">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9 gap-1.5 border-violet-500/40 bg-[#0d1117]/90 px-3 text-xs text-violet-300 shadow-xl backdrop-blur-md hover:bg-violet-500/20"
+                    onClick={() => setInpaintingOpen(true)}
+                  >
+                    <Paintbrush className="h-3.5 w-3.5" />
+                    {language === "hu" ? "Anyagszerkesztő" : "Material editor"}
+                  </Button>
+                </div>
+              )}
             </div>
-            {/* ── PREVIEW IMAGE (bottom) — shows generated result with preset filter ─── */}
-            <ZoomableImagePanel
-              src={hasGeneratedVersion ? (compareVersion?.fileUrl ?? displayUrl) : displayUrl}
-              alt={language === "hu" ? "Előnézeti kép" : "Preview image"}
-              label={language === "hu" ? "Előnézeti kép" : "Preview image"}
-              badge={
-                hasGeneratedVersion ? (
-                  <Badge variant="outline" className="border-violet-500/30 bg-violet-500/10 text-violet-300 text-[0.6rem] px-1.5 py-0">
-                    {formatVersionLabel(compareVersion?.versionType ?? "realism", language)}
-                  </Badge>
-                ) : undefined
-              }
-              emptyText={t("workspace.projectFiles", language)}
-              filterStyle={presetEnabled ? filterStyle : undefined}
-              onFullscreen={() => setFullscreenOpen(true)}
-              className="shrink-0 min-h-0 flex-1"
-            />
-            {/* The full-width queue-status strip used to live here. Removed
-                per the 2026-06-12 redesign: it duplicated the progress now
-                shown inside the Generate CTA and ate ~70px of canvas. */}
           </div>
         </motion.section>
 
