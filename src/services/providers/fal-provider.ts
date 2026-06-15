@@ -205,8 +205,13 @@ export class FalAiProvider implements ProviderAdapter {
         guidance_scale: DEFAULT_GUIDANCE_SCALE,
         // The watermark/text/logo bans exist because test renders sourced
         // from stock sites carry diagonal watermarks — without the ban the
-        // model happily "enhances" the watermark into the output.
+        // model happily "enhances" the watermark into the output. A user-
+        // supplied negative prompt (workspace Advanced section) is
+        // prepended so it carries the most weight.
         negative_prompt:
+          (typeof settings.negativePrompt === "string" && settings.negativePrompt.trim()
+            ? `${settings.negativePrompt.trim()}, `
+            : "") +
           "redesigned building, different roof material, repainted facade, " +
           "new vehicles, new people, different camera angle, indoor scene, " +
           "fantasy architecture, cartoon style, illustration, low quality, " +

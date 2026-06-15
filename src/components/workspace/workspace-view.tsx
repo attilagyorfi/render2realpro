@@ -53,7 +53,6 @@ import { ComparisonView } from "@/components/comparison/comparison-view";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ProgressMeter } from "@/components/ui/progress-meter";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
@@ -65,7 +64,6 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
-import { StatusDot } from "@/components/ui/status-dot";
 import { Textarea } from "@/components/ui/textarea";
 import { t } from "@/i18n";
 import { ApiError, fetchJson } from "@/lib/fetch-json";
@@ -541,6 +539,13 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
   const [enableUpscaling, setEnableUpscaling] = useState(false);
   const [generationQuality, setGenerationQuality] = useState<"low" | "medium" | "high">("medium");
   const [presetEnabled, setPresetEnabled] = useState(false);
+  // ── Advanced generation controls (redesign ② section) ──────────────
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [metadataOpen, setMetadataOpen] = useState(false);
+  const [negativePrompt, setNegativePrompt] = useState("");
+  // Denoising strength exposed to the user. 0.4 = the calibrated
+  // architectural default; higher values let the model transform more.
+  const [creativity, setCreativity] = useState(0.4);
   const [newPresetDialogOpen, setNewPresetDialogOpen] = useState(false);
   const [newPresetName, setNewPresetName] = useState("");
   const [isSavingPreset, setIsSavingPreset] = useState(false);
@@ -559,7 +564,6 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
     selectedVersionId,
     compareEnabled,
     activePresetId,
-    queue,
     editor,
     setSelectedAsset,
     setCompareEnabled,
@@ -692,7 +696,12 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
           presetId: customPromptEnabled ? undefined : activePresetId,
           customPrompt: customPromptEnabled ? customPromptText : undefined,
           providerOverride,
-          settingsOverride: { enableUpscaling, quality: generationQuality },
+          settingsOverride: {
+            enableUpscaling,
+            quality: generationQuality,
+            creativity,
+            negativePrompt: negativePrompt.trim() || undefined,
+          },
         }),
       });
     },
@@ -900,10 +909,30 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
     setCompareEnabled(true);
   }, [sortedAssets, activePresetId, batchGenerating, effectiveProvider, upsertQueueEntry, language, customPromptEnabled, customPromptText, queryClient, projectId, setCompareEnabled]);
 
-  const latestLog = selectedAsset?.generationLogs[0];
   const referenceUrl = selectedAsset?.storedFileUrl;
   const displayUrl = selectedVersion?.fileUrl ?? referenceUrl;
   const isGenerating = generateMutation.isPending;
+
+  // Heuristic progress for the in-button indicator (redesign ③): same
+  // log-curve as the canvas overlay, recomputed here because the button
+  // lives in the parent. We never reset to 0 in the effect — the button
+  // only renders ctaProgress while isGenerating, and each new run stamps
+  // a fresh generationStartedAt (onMutate), so the first tick lands back
+  // near 0 on its own. Avoiding the reset keeps the effect free of a
+  // synchronous setState (react-hooks/set-state-in-effect).
+  const [ctaProgress, setCtaProgress] = useState(0);
+  useEffect(() => {
+    if (!isGenerating) return;
+    const totalMs =
+      generationQuality === "low" ? 15_000 : generationQuality === "high" ? 40_000 : 25_000;
+    const tick = () => {
+      const raw = Math.min(0.95, (Date.now() - generationStartedAt) / totalMs);
+      setCtaProgress(Math.round(Math.pow(raw, 0.55) * 95));
+    };
+    tick();
+    const id = setInterval(tick, 500);
+    return () => clearInterval(id);
+  }, [isGenerating, generationStartedAt, generationQuality]);
 
   // Compute CSS filter string from editor values for live preview
   const filterStyle = useMemo(() => {
@@ -1454,33 +1483,10 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
               filterStyle={presetEnabled ? filterStyle : undefined}
               onFullscreen={() => setFullscreenOpen(true)}
               className="shrink-0 min-h-0 flex-1"
-            />         {/* Queue status bar */}
-            <div className="rounded-[20px] border border-white/8 bg-[#0a0d14] px-4 py-3 shrink-0">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs text-zinc-500">
-                  <StatusDot
-                    tone={
-                      queue[0]?.status === "completed" ? "success"
-                        : queue[0]?.status === "failed" ? "danger"
-                        : queue[0]?.status === "queued" ? "warning"
-                        : queue[0]?.status === "processing" ? "info"
-                        : "neutral"
-                    }
-                  />
-                  <span className="uppercase tracking-[0.14em]">{t("workspace.queueStatus", language)}</span>
-                </div>
-                <span className="font-mono text-xs text-zinc-400">
-                  {queue[0]?.message || latestLog?.status || t("common.idle", language)}
-                </span>
-              </div>
-              <ProgressMeter value={queue[0]?.progress ?? (isGenerating ? 55 : 0)} className="mt-2" />
-              {latestLog ? (
-                <div className="mt-2 flex items-center justify-between font-mono text-[0.65rem] text-zinc-600">
-                  <span>{latestLog.processingTime} ms</span>
-                  <span>{latestLog.success ? "✓" : latestLog.errorMessage || t("common.retryNeeded", language)}</span>
-                </div>
-              ) : null}
-            </div>
+            />
+            {/* The full-width queue-status strip used to live here. Removed
+                per the 2026-06-12 redesign: it duplicated the progress now
+                shown inside the Generate CTA and ate ~70px of canvas. */}
           </div>
         </motion.section>
 
@@ -1518,121 +1524,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
               <ScrollArea className="min-h-0 flex-1 pr-4">
                 <div className="flex flex-col gap-5">
 
-                  {/* ── VERSION HISTORY ───────────────────────────────────── */}
-                  <div className="flex flex-col gap-2">
-                    <div className="text-[0.65rem] uppercase tracking-[0.24em] text-zinc-600">
-                      {t("workspace.versionHistory", language)}
-                    </div>
-                    {(!selectedAsset || selectedAsset.imageVersions.length === 0) && (
-                      <div className="rounded-[16px] border border-white/8 bg-white/3 px-3 py-3 text-xs text-zinc-600">
-                        {language === "hu" ? "Még nincs verzió" : "No versions yet"}
-                      </div>
-                    )}
-                    {selectedAsset?.imageVersions.map((version) => {
-                      const isGenerated = version.versionType === "realism_pass" || version.versionType === "texture_pass";
-                      const isActive = version.id === selectedVersion?.id;
-                      return (
-                        <div
-                          key={version.id}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => {
-                            // Select the version and disable compare so the selected image is shown
-                            setSelectedAsset(selectedAsset.id, version.id);
-                            setCompareEnabled(false);
-                          }}
-                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setSelectedAsset(selectedAsset.id, version.id); setCompareEnabled(false); } }}
-                          className={`flex cursor-pointer items-center justify-between rounded-[18px] border px-3 py-2.5 text-left transition ${
-                            isActive
-                              ? "border-blue-500/40 bg-blue-500/10"
-                              : "border-white/8 bg-white/3 hover:bg-white/5"
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <div className={`flex size-8 items-center justify-center rounded-[12px] border ${isActive ? "border-blue-500/30 bg-blue-500/15" : "border-white/10 bg-white/5"}`}>
-                              <ImageIcon className={`size-3.5 ${isActive ? "text-blue-400" : "text-zinc-500"}`} />
-                            </div>
-                            <div>
-                              <div className={`text-xs font-medium ${isActive ? "text-blue-200" : "text-zinc-300"}`}>
-                                {formatVersionLabel(version.versionType, language)}
-                              </div>
-                              <div className="font-mono text-[0.6rem] text-zinc-600">
-                                {new Date(version.createdAt).toLocaleString()}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            {isGenerated && !isActive && (
-                              <button
-                                type="button"
-                                title={language === "hu" ? "Visszaallítás" : "Restore"}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  restoreVersionMutation.mutate({ assetId: selectedAsset.id, versionId: version.id });
-                                }}
-                                className="flex size-6 items-center justify-center rounded-[8px] border border-white/10 bg-white/4 text-zinc-500 transition hover:bg-emerald-500/15 hover:border-emerald-500/30 hover:text-emerald-400"
-                              >
-                                <ChevronLeft className="size-3" />
-                              </button>
-                            )}
-                            <Badge
-                              variant={isGenerated ? "secondary" : "outline"}
-                              className={isGenerated
-                                ? "border-violet-500/30 bg-violet-500/10 text-violet-300 text-[0.6rem]"
-                                : "border-white/10 text-zinc-500 text-[0.6rem]"}
-                            >
-                              {isGenerated ? t("common.generated", language) : t("common.saved", language)}
-                            </Badge>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <Separator />
-
-                  {/* ── AUTO ENHANCE BUTTON ───────────────────────────────── */}
-                  <div className="flex flex-col gap-2">
-                    <Button
-                      size="default"
-                      onClick={() => generateMutation.mutate(undefined)}
-                      disabled={!selectedAsset || (presetEnabled && !activePresetId) || isGenerating || batchGenerating || customPromptEnabled}
-                      className="w-full bg-gradient-to-r from-blue-600 to-violet-600 hover:from-blue-500 hover:to-violet-500 text-white font-semibold shadow-lg shadow-blue-500/20 border-0 h-11"
-                    >
-                      <Sparkles className="size-4 mr-2" />
-                      {isGenerating
-                        ? (language === "hu" ? "Generálás…" : "Generating…")
-                        : (language === "hu" ? "Automatikus javítás" : "Auto enhance")}
-                    </Button>
-                    {/* Batch generate — only shown when multiple assets exist */}
-                    {sortedAssets.length > 1 && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={handleBatchGenerate}
-                        disabled={(presetEnabled && !activePresetId) || isGenerating || batchGenerating || customPromptEnabled}
-                        className="w-full border-white/10 text-zinc-300 hover:bg-white/5"
-                      >
-                        <Sparkles className="size-3.5 mr-1.5" />
-                        {batchGenerating
-                          ? (language === "hu"
-                              ? `Batch: ${batchProgress.done}/${batchProgress.total}…`
-                              : `Batch: ${batchProgress.done}/${batchProgress.total}…`)
-                          : (language === "hu"
-                              ? `Összes generálása (${sortedAssets.length} kép)`
-                              : `Generate all (${sortedAssets.length} images)`)}
-                      </Button>
-                    )}
-                    <p className="text-[0.65rem] text-zinc-600 text-center">
-                      {language === "hu"
-                        ? "Az aktív preset és beállítások alapján"
-                        : "Based on active preset and settings"}
-                    </p>
-                  </div>
-
-                  <Separator />
-
-                  {/* ── PRESET ────────────────────────────────────────────── */}
+                  {/* ── ① INPUT · PRESET ──────────────────────────────────── */}
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center justify-between">
                       <div className="text-xs uppercase tracking-[0.24em] text-zinc-500">
@@ -1682,33 +1574,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                     </Select>
                   </div>
 
-                  {/* ── SLIDERS ───────────────────────────────────────────── */}
-                  {!customPromptEnabled && presetEnabled && (
-                    <div className="flex flex-col gap-3">
-                      {sliderControls.map((control) => (
-                        <div key={control.key} className="flex flex-col gap-2">
-                          <div className="flex items-center justify-between text-sm text-zinc-200">
-                            <span>{t(control.labelKey, language)}</span>
-                            <span className="text-zinc-500">{String(editor[control.key as keyof typeof editor])}</span>
-                          </div>
-                          <Slider
-                            value={[Number(editor[control.key as keyof typeof editor])]}
-                            min={control.min}
-                            max={control.max}
-                            step={1}
-                            onValueChange={(nextValue) => {
-                              const value = Array.isArray(nextValue) ? nextValue[0] : nextValue;
-                              setEditorValue(control.key as keyof typeof editor, value as never);
-                            }}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  <Separator />
-
-                  {/* ── CUSTOM PROMPT TOGGLE ──────────────────────────────── */}
+                  {/* ── ① INPUT · CUSTOM PROMPT ───────────────────────────── */}
                   <div className="flex flex-col gap-3">
                     <label className="flex cursor-pointer items-center gap-3">
                       <div className="relative shrink-0">
@@ -1727,33 +1593,20 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                     </label>
 
                     {customPromptEnabled && (
-                      <div className="flex flex-col gap-2">
-                        <Textarea
-                          value={customPromptText}
-                          onChange={(e) => setCustomPromptText(e.target.value)}
-                          placeholder={language === "hu"
-                            ? "Pl. Tedd fotórealisztikussá az épületet, tartsd meg a geometriát, adj hozzá természetes fényt és fákat..."
-                            : "E.g. Make the building photorealistic, preserve geometry, add natural lighting and trees..."}
-                          className="min-h-[100px] resize-none text-sm"
-                        />
-                        <Button
-                          size="sm"
-                          onClick={() => generateMutation.mutate(undefined)}
-                          disabled={!selectedAsset || !customPromptText.trim() || isGenerating}
-                          className="w-full"
-                        >
-                          <ScanSearch data-icon="inline-start" />
-                          {isGenerating
-                            ? t("common.loading", language)
-                            : (language === "hu" ? "Generálás saját prompttal" : "Generate with custom prompt")}
-                        </Button>
-                      </div>
+                      <Textarea
+                        value={customPromptText}
+                        onChange={(e) => setCustomPromptText(e.target.value)}
+                        placeholder={language === "hu"
+                          ? "Pl. Tedd fotórealisztikussá az épületet, tartsd meg a geometriát, adj hozzá természetes fényt és fákat..."
+                          : "E.g. Make the building photorealistic, preserve geometry, add natural lighting and trees..."}
+                        className="min-h-[100px] resize-none text-sm"
+                      />
                     )}
                   </div>
 
                   <Separator />
 
-                  {/* ── QUALITY SELECTOR ─────────────────────────────────────────────── */}
+                  {/* ── ① INPUT · QUALITY ─────────────────────────────────── */}
                   <div className="flex flex-col gap-2">
                     <div className="text-xs font-medium text-zinc-400">
                       {language === "hu" ? "Generálás minősége" : "Generation quality"}
@@ -1806,56 +1659,228 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                     </label>
                   </div>
 
+                  {/* ── ② ADVANCED SETTINGS (collapsed accordion) ─────────── */}
+                  <div className="rounded-[18px] border border-white/8 bg-white/3">
+                    <button
+                      type="button"
+                      onClick={() => setAdvancedOpen((open) => !open)}
+                      aria-expanded={advancedOpen}
+                      className="flex w-full items-center justify-between px-4 py-3 text-xs font-medium text-zinc-300 transition hover:text-zinc-100"
+                    >
+                      <span>{t("workspace.advancedSettings", language)}</span>
+                      <ChevronLeft
+                        className={`size-3.5 text-zinc-500 transition-transform ${advancedOpen ? "-rotate-90" : "rotate-0"}`}
+                      />
+                    </button>
+                    {advancedOpen && (
+                      <div className="flex flex-col gap-4 border-t border-white/8 px-4 py-4">
+                        {/* Negative prompt — user additions ride on top of the
+                            always-on server-side bans (watermark/text/logo). */}
+                        <div className="flex flex-col gap-1.5">
+                          <span className="text-xs text-zinc-400">
+                            {t("workspace.negativePrompt", language)}
+                          </span>
+                          <Textarea
+                            value={negativePrompt}
+                            onChange={(e) => setNegativePrompt(e.target.value)}
+                            placeholder={t("workspace.negativePromptPlaceholder", language)}
+                            className="min-h-[64px] resize-none text-sm"
+                          />
+                        </div>
+                        {/* Creativity / denoising strength */}
+                        <div className="flex flex-col gap-1.5">
+                          <div className="flex items-center justify-between text-xs text-zinc-400">
+                            <span>{t("workspace.creativity", language)}</span>
+                            <span className="font-mono text-zinc-500">{creativity.toFixed(2)}</span>
+                          </div>
+                          <Slider
+                            value={[creativity]}
+                            min={0.2}
+                            max={0.85}
+                            step={0.05}
+                            onValueChange={(v) => setCreativity((Array.isArray(v) ? v[0] : v) as number)}
+                          />
+                          <span className="text-[0.65rem] text-zinc-600">
+                            {t("workspace.creativityHint", language)}
+                          </span>
+                        </div>
+                        {/* Preview-only colour filters — clearly labelled so
+                            nobody thinks they steer the AI (audit P1.5). */}
+                        {!customPromptEnabled && presetEnabled && (
+                          <div className="flex flex-col gap-3 border-t border-white/8 pt-3">
+                            <span className="text-[0.65rem] text-zinc-500">
+                              {t("workspace.previewFilters", language)}
+                            </span>
+                            {sliderControls.map((control) => (
+                              <div key={control.key} className="flex flex-col gap-2">
+                                <div className="flex items-center justify-between text-xs text-zinc-400">
+                                  <span>{t(control.labelKey, language)}</span>
+                                  <span className="text-zinc-600">{String(editor[control.key as keyof typeof editor])}</span>
+                                </div>
+                                <Slider
+                                  value={[Number(editor[control.key as keyof typeof editor])]}
+                                  min={control.min}
+                                  max={control.max}
+                                  step={1}
+                                  onValueChange={(nextValue) => {
+                                    const value = Array.isArray(nextValue) ? nextValue[0] : nextValue;
+                                    setEditorValue(control.key as keyof typeof editor, value as never);
+                                  }}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── ③ ACTION · GENERATE CTA (progress lives in the button) */}
+                  <div className="flex flex-col gap-2">
+                    <Button
+                      size="default"
+                      onClick={() => generateMutation.mutate(undefined)}
+                      disabled={
+                        !selectedAsset ||
+                        isGenerating ||
+                        batchGenerating ||
+                        (customPromptEnabled
+                          ? customPromptText.trim().length < 4
+                          : presetEnabled && !activePresetId)
+                      }
+                      className="relative h-11 w-full overflow-hidden border-0 bg-gradient-to-r from-blue-600 to-violet-600 font-semibold text-white shadow-lg shadow-blue-500/20 hover:from-blue-500 hover:to-violet-500"
+                    >
+                      {isGenerating && (
+                        <span
+                          className="absolute inset-y-0 left-0 bg-white/20 transition-[width] duration-500"
+                          style={{ width: `${ctaProgress}%` }}
+                        />
+                      )}
+                      <span className="relative flex items-center justify-center gap-2">
+                        <Sparkles className="size-4" />
+                        {isGenerating
+                          ? `${ctaProgress}% — ${language === "hu" ? "Generálás…" : "Generating…"}`
+                          : (language === "hu" ? "Automatikus javítás" : "Auto enhance")}
+                      </span>
+                    </Button>
+                    {isGenerating && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        type="button"
+                        onClick={() => generateAbortRef.current?.abort()}
+                        className="w-full text-zinc-400"
+                      >
+                        {language === "hu" ? "Mégse" : "Cancel"}
+                      </Button>
+                    )}
+                    {sortedAssets.length > 1 && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleBatchGenerate}
+                        disabled={(presetEnabled && !activePresetId) || isGenerating || batchGenerating || customPromptEnabled}
+                        className="w-full border-white/10 text-zinc-300 hover:bg-white/5"
+                      >
+                        <Sparkles className="size-3.5 mr-1.5" />
+                        {batchGenerating
+                          ? `Batch: ${batchProgress.done}/${batchProgress.total}…`
+                          : (language === "hu"
+                              ? `Összes generálása (${sortedAssets.length} kép)`
+                              : `Generate all (${sortedAssets.length} images)`)}
+                      </Button>
+                    )}
+                  </div>
+
                   <Separator />
 
-                  {/* ── GENERATION HISTORY ───────────────────────────────── */}
-                  {selectedAsset && selectedAsset.generationLogs.length > 0 && (
-                    <div className="flex flex-col gap-2">
-                      <div className="text-[0.65rem] uppercase tracking-[0.24em] text-zinc-600">
-                        {language === "hu" ? "Generálási előzmények" : "Generation history"}
+                  {/* ── ④ OUTPUT · HISTORY / VERSIONS ─────────────────────── */}
+                  <div className="flex flex-col gap-2">
+                    <div className="text-[0.65rem] uppercase tracking-[0.24em] text-zinc-600">
+                      {t("workspace.versionHistory", language)}
+                    </div>
+                    {(!selectedAsset || selectedAsset.imageVersions.length === 0) && (
+                      <div className="rounded-[16px] border border-white/8 bg-white/3 px-3 py-3 text-xs text-zinc-600">
+                        {language === "hu" ? "Még nincs verzió" : "No versions yet"}
                       </div>
-                      <div className="flex flex-col gap-1.5">
-                        {selectedAsset.generationLogs.map((log) => (
-                          <div
-                            key={log.id}
-                            className="flex items-center gap-2 rounded-[12px] border border-white/8 bg-white/3 px-3 py-2"
-                          >
-                            <div className={`size-1.5 rounded-full shrink-0 ${
-                              log.success ? "bg-emerald-400" : "bg-red-400"
-                            }`} />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center justify-between gap-1">
-                                <span className="text-xs text-zinc-300 truncate">{log.providerName}</span>
-                                <span className="text-[0.6rem] text-zinc-600 shrink-0">
-                                  {log.processingTime > 0 ? `${(log.processingTime / 1000).toFixed(1)}s` : ""}
-                                </span>
+                    )}
+                    {selectedAsset?.imageVersions.map((version) => {
+                      const isGenerated = version.versionType === "realism_pass" || version.versionType === "texture_pass";
+                      const isActive = version.id === selectedVersion?.id;
+                      return (
+                        <div
+                          key={version.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => {
+                            setSelectedAsset(selectedAsset.id, version.id);
+                            setCompareEnabled(false);
+                          }}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { setSelectedAsset(selectedAsset.id, version.id); setCompareEnabled(false); } }}
+                          className={`flex cursor-pointer items-center justify-between rounded-[18px] border px-3 py-2.5 text-left transition ${
+                            isActive
+                              ? "border-blue-500/40 bg-blue-500/10"
+                              : "border-white/8 bg-white/3 hover:bg-white/5"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <div className={`flex size-8 items-center justify-center rounded-[12px] border ${isActive ? "border-blue-500/30 bg-blue-500/15" : "border-white/10 bg-white/5"}`}>
+                              <ImageIcon className={`size-3.5 ${isActive ? "text-blue-400" : "text-zinc-500"}`} />
+                            </div>
+                            <div>
+                              <div className={`text-xs font-medium ${isActive ? "text-blue-200" : "text-zinc-300"}`}>
+                                {formatVersionLabel(version.versionType, language)}
                               </div>
-                              <div className="flex items-center justify-between gap-1 mt-0.5">
-                                <span className="text-[0.6rem] text-zinc-600 truncate">
-                                  {new Date(log.createdAt).toLocaleString(language === "hu" ? "hu-HU" : "en-US", {
-                                    month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
-                                  })}
-                                </span>
-                                {!log.success && log.errorMessage && (
-                                  <span className="text-[0.6rem] text-red-400 truncate max-w-[100px]" title={log.errorMessage}>
-                                    {log.errorMessage.slice(0, 24)}…
-                                  </span>
-                                )}
+                              <div className="font-mono text-[0.6rem] text-zinc-600">
+                                {new Date(version.createdAt).toLocaleString()}
                               </div>
                             </div>
                           </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                          <div className="flex items-center gap-1.5">
+                            {isGenerated && !isActive && (
+                              <button
+                                type="button"
+                                title={language === "hu" ? "Visszaállítás" : "Restore"}
+                                aria-label={language === "hu" ? "Visszaállítás" : "Restore"}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  restoreVersionMutation.mutate({ assetId: selectedAsset.id, versionId: version.id });
+                                }}
+                                className="flex size-6 items-center justify-center rounded-[8px] border border-white/10 bg-white/4 text-zinc-500 transition hover:bg-emerald-500/15 hover:border-emerald-500/30 hover:text-emerald-400"
+                              >
+                                <ChevronLeft className="size-3" />
+                              </button>
+                            )}
+                            <Badge
+                              variant={isGenerated ? "secondary" : "outline"}
+                              className={isGenerated
+                                ? "border-violet-500/30 bg-violet-500/10 text-violet-300 text-[0.6rem]"
+                                : "border-white/10 text-zinc-500 text-[0.6rem]"}
+                            >
+                              {isGenerated ? t("common.generated", language) : t("common.saved", language)}
+                            </Badge>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
 
-                  {/* ── IMAGE METADATA ───────────────────────────────────── */}
+                  {/* ── ⑤ IMAGE METADATA (collapsed accordion, bottom) ────── */}
                   {selectedAsset && (
-                    <div className="flex flex-col gap-2">
-                      <div className="text-[0.65rem] uppercase tracking-[0.24em] text-zinc-600">
-                        {language === "hu" ? "Kép adatok" : "Image metadata"}
-                      </div>
-                      <div className="rounded-[12px] border border-white/8 bg-white/3 px-3 py-2 space-y-1.5">
+                    <div className="rounded-[18px] border border-white/8 bg-white/3">
+                      <button
+                        type="button"
+                        onClick={() => setMetadataOpen((open) => !open)}
+                        aria-expanded={metadataOpen}
+                        className="flex w-full items-center justify-between px-4 py-3 text-xs font-medium text-zinc-300 transition hover:text-zinc-100"
+                      >
+                        <span>{language === "hu" ? "Kép adatok" : "Image metadata"}</span>
+                        <ChevronLeft
+                          className={`size-3.5 text-zinc-500 transition-transform ${metadataOpen ? "-rotate-90" : "rotate-0"}`}
+                        />
+                      </button>
+                      {metadataOpen && (
+                      <div className="border-t border-white/8 px-3 py-2 space-y-1.5">
                         <div className="flex items-center justify-between">
                           <span className="text-[0.65rem] text-zinc-600">{language === "hu" ? "Fájlnév" : "Filename"}</span>
                           <span className="text-[0.65rem] text-zinc-400 truncate max-w-[140px]" title={selectedAsset.originalFileName}>
@@ -1877,6 +1902,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                           <span className="text-[0.65rem] text-zinc-400">{selectedAsset.generationLogs.length}</span>
                         </div>
                       </div>
+                      )}
                     </div>
                   )}
 

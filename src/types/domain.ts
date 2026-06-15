@@ -9,6 +9,14 @@ export type PresetSettings = {
   ambientOcclusionLevel: number;
   strictGeometryPreservation: boolean;
   avoidHallucinations: boolean;
+  // ── Per-generation controls (not part of a saved preset) ─────────────
+  // These ride in on settingsOverride and are read by the Fal provider.
+  // They are NOT clamped to the 0..1 preset range — the provider
+  // interprets them directly.
+  creativity?: number;
+  quality?: "low" | "medium" | "high";
+  negativePrompt?: string;
+  enableUpscaling?: boolean;
 };
 
 export type PresetDefinition = {

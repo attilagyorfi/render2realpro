@@ -194,10 +194,23 @@ export function mergePresetSettings(
   baseSettings: PresetSettings,
   override?: Partial<PresetSettings>
 ): PresetSettings {
-  return clampPresetSettings({
+  const clamped = clampPresetSettings({
     ...baseSettings,
     ...override,
     strictGeometryPreservation: true,
     avoidHallucinations: true,
   });
+
+  // clampPresetSettings deliberately rebuilds only the 0..1 preset knobs,
+  // which would otherwise drop the per-generation control keys
+  // (creativity / quality / negativePrompt / enableUpscaling) the
+  // workspace sends via settingsOverride. Re-attach them here so they
+  // reach the Fal provider untouched.
+  const passthrough: Partial<PresetSettings> = {};
+  if (override?.creativity !== undefined) passthrough.creativity = override.creativity;
+  if (override?.quality !== undefined) passthrough.quality = override.quality;
+  if (override?.negativePrompt !== undefined) passthrough.negativePrompt = override.negativePrompt;
+  if (override?.enableUpscaling !== undefined) passthrough.enableUpscaling = override.enableUpscaling;
+
+  return { ...clamped, ...passthrough };
 }
