@@ -543,12 +543,13 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [negativePrompt, setNegativePrompt] = useState("");
-  // Denoising strength exposed to the user. 0.55 matches the recalibrated
-  // architectural default in fal-provider (raised from 0.4 after the
-  // CG-warehouse tests showed the lower value produced near-identical
-  // output). Lower it for fragile geometry, raise it for bold material
-  // transformation.
-  const [creativity, setCreativity] = useState(0.55);
+  // Clarity Upscaler's `creativity` knob. 0.35 = Clarity's documented
+  // default — sharpens the source and adds plausible micro-detail
+  // (concrete porosity, panel seams, blade-level grass) without
+  // inventing new elements. Values above ~0.6 start hallucinating
+  // detail the source never implied, so the slider is bounded to
+  // 0.1..0.7 below.
+  const [creativity, setCreativity] = useState(0.35);
   const [newPresetDialogOpen, setNewPresetDialogOpen] = useState(false);
   const [newPresetName, setNewPresetName] = useState("");
   const [isSavingPreset, setIsSavingPreset] = useState(false);
@@ -1705,8 +1706,8 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                           </div>
                           <Slider
                             value={[creativity]}
-                            min={0.2}
-                            max={0.85}
+                            min={0.1}
+                            max={0.7}
                             step={0.05}
                             onValueChange={(v) => setCreativity((Array.isArray(v) ? v[0] : v) as number)}
                           />
