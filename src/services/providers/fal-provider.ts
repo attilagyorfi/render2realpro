@@ -65,12 +65,14 @@ const DEFAULT_MODEL = process.env.FAL_MODEL ?? "fal-ai/clarity-upscaler";
  */
 const DEFAULT_CREATIVITY = Number(process.env.FAL_CREATIVITY ?? "0.55");
 /**
- * Clarity's `resemblance` knob (0..3 in the API). Higher = sticks closer
- * to the source pixels. 1.5 was firm enough to lock building geometry
- * but also smothered texture rework; 1.2 still pins composition while
- * letting the higher creativity actually breathe on surfaces.
+ * Clarity's `resemblance` knob (0..3 in the API). Per the research
+ * brief, 0.6 is the documented Clarity default and the value the
+ * Magnific-style "make CG photoreal" recipes actually use — values
+ * above 1.0 over-pin the source and smother the diffusion update.
+ * The ControlNet Tile baked into Clarity already handles structural
+ * preservation; resemblance only needs to nudge it, not enforce it.
  */
-const DEFAULT_RESEMBLANCE = Number(process.env.FAL_RESEMBLANCE ?? "1.2");
+const DEFAULT_RESEMBLANCE = Number(process.env.FAL_RESEMBLANCE ?? "0.6");
 /**
  * SUPIR/Clarity-family models perform detail enhancement AS PART OF
  * the upscale step — at upscale_factor=1 the pipeline effectively
@@ -128,7 +130,14 @@ type FalSubscribeResponse = {
 };
 
 export class FalAiProvider implements ProviderAdapter {
-  readonly name = "fal-clarity-upscaler";
+  // Identifier kept stable across model changes (R6/R7/R8/R9) because
+  // provider-registry.ts advertises this exact string and the user's
+  // .env's RENDER2REAL_ACTIVE_PROVIDER also references it. When R6
+  // briefly changed this to "fal-clarity-upscaler" the resolveProvider
+  // name-match failed and EVERY generation silently fell through to
+  // MockLocalProvider — the user saw mock output for several sprints
+  // without realising. The label is fine to evolve; the name is not.
+  readonly name = "fal-controlnet";
   readonly label = "Fal.ai Clarity Upscaler (Architectural Detail Pass)";
 
   async generateRealismPass(
@@ -166,39 +175,58 @@ export class FalAiProvider implements ProviderAdapter {
     const sourceUrl = await fal.storage.upload(sourceFile);
 
     // ── 3. Build prompt ────────────────────────────────────────────────────
-    // Clarity treats the prompt as a flavour hint for what KIND of
-    // detail to add; with the high `resemblance` value below it cannot
-    // use the prompt to redesign. Keep it short and oriented toward the
-    // material categories typical in architectural exteriors.
+    // Pattern from the research brief: describe the PHOTOGRAPH, not the
+    // SCENE. Listing scene nouns ("a warehouse", "trees", "a car") gives
+    // the model permission to redesign them; listing camera + materials
+    // + atmosphere steers it to repaint surfaces while the ControlNet
+    // Tile (baked into Clarity) preserves layout.
     const promptParts: string[] = [
-      "masterpiece, best quality, highres, photorealistic architectural exterior photograph, real building materials, sharp natural daylight, fine surface detail on concrete, metal, glass, asphalt and vegetation",
+      "masterpiece, best quality, highres",
+      "professional architectural photography, photorealistic, ultra realistic materials",
+      "shot on Hasselblad H6D, 85mm lens, fine grain",
+      "weathered concrete with visible porosity, brushed aluminum panels with seam highlights, asphalt aggregate, blade-level grass texture, real glass reflections",
+      "late afternoon natural sun, subtle atmospheric haze, soft contact shadows, ambient occlusion in eaves",
     ];
     if (input.prompt.presetName && input.prompt.presetName !== "custom") {
-      promptParts.push(`Style hint: ${input.prompt.presetName}`);
+      promptParts.push(`style: ${input.prompt.presetName}`);
     }
     if (input.prompt.customDirectives?.length) {
       promptParts.push(...input.prompt.customDirectives);
     }
     const prompt = promptParts.join(", ");
 
-    // Negative prompt: workspace-supplied negative first (highest weight),
-    // then the standing bans against fantasy redesigns, watermarks, and
-    // composition changes. Even with high resemblance, this catches the
-    // rare drift case (e.g., Clarity adding text on glass surfaces).
+    // Negative prompt: keywords that describe the INPUT (cgi, render,
+    // plastic, smooth) are critical here — they push the diffusion
+    // AWAY from the CG look the source has. Without them the model
+    // happily preserves the cg-plastic appearance. Workspace-supplied
+    // negative is prepended for highest weight.
     const userNegative =
       typeof settings.negativePrompt === "string" && settings.negativePrompt.trim()
         ? `${settings.negativePrompt.trim()}, `
         : "";
     const negativePrompt =
       userNegative +
-      "(worst quality, low quality, normal quality:2), painting, illustration, " +
-      "fantasy, cartoon, redesigned building, different roof material, repainted facade, " +
-      "new vehicles, new people, new windows, new doors, " +
-      "added decoration, removed decoration, " +
-      "watermark, stock photo watermark, sample text, letters, typography, " +
-      "captions, logo, signature, branding overlay";
+      "(worst quality, low quality, normal quality:2), " +
+      "cgi, 3d render, computer graphics, video game, unreal engine, " +
+      "plastic, smooth surface, oversaturated, flat colours, " +
+      "painting, illustration, drawing, cartoon, anime, fantasy, " +
+      "redesigned building, deformed geometry, extra windows, missing windows, " +
+      "changed building shape, different roof material, repainted facade, " +
+      "new vehicles, new people, added decoration, removed decoration, " +
+      "watermark, sample text, letters, typography, logo, signature";
 
     // ── 4. Call Fal.ai — Clarity Upscaler ──────────────────────────────────
+    // Two field-name bugs fixed in R9 after the research brief:
+    //   - `upscale_factor` → `scale_factor` (the actual Fal schema name;
+    //     Fal silently ignored the unknown key, falling back to its
+    //     scale_factor=1 default — the no-op that returned the source
+    //     in seconds).
+    //   - explicit `downscaling: false` — without it Clarity sometimes
+    //     downscales then "upscales" back, collapsing tile count and
+    //     short-circuiting the diffusion pass.
+    // A fresh random seed per call also defeats any Fal-side cache
+    // hits keyed on (image, params) tuples.
+    const seed = Math.floor(Math.random() * 2 ** 31);
     const result = (await fal.subscribe(DEFAULT_MODEL, {
       input: {
         image_url: sourceUrl,
@@ -206,9 +234,11 @@ export class FalAiProvider implements ProviderAdapter {
         negative_prompt: negativePrompt,
         creativity,
         resemblance: DEFAULT_RESEMBLANCE,
-        upscale_factor: DEFAULT_UPSCALE_FACTOR,
+        scale_factor: DEFAULT_UPSCALE_FACTOR,
+        downscaling: false,
         num_inference_steps: steps,
         guidance_scale: DEFAULT_GUIDANCE_SCALE,
+        seed,
         enable_safety_checker: false,
       },
       logs: false,

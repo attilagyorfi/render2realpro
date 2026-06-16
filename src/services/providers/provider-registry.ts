@@ -78,5 +78,18 @@ export function getActiveProviderName(snapshot = getProviderStatusSnapshot()) {
     return requestedProvider.name;
   }
 
+  // The silent fall-through to mock here is a footgun: in R6..R8 a
+  // refactor renamed the Fal provider's `name` constant, which broke
+  // resolveProvider's identity match, and several sprints of "the
+  // result looks like the source" were really the mock provider's
+  // saturation + sharpen + vignette pipeline. The console.warn makes
+  // that case loud the moment the server boots so the next regression
+  // doesn't waste days of debugging. (The actual fall-through stays —
+  // it's a deliberate convenience for unconfigured demo setups.)
+  if (snapshot.activeProvider && snapshot.activeProvider !== "mock-local") {
+    console.warn(
+      `[provider-registry] activeProvider="${snapshot.activeProvider}" requested but not configured — falling back to mock-local. Generations will run the local sharp-based mock, not a real model.`
+    );
+  }
   return "mock-local";
 }
