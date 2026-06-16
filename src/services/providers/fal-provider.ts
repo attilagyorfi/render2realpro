@@ -1,38 +1,35 @@
 /**
  * fal-provider.ts — Realism-pass adapter for Fal.ai
  *
- * History (kept for context, since model choice is the single most
- * impactful knob in the whole product):
+ * History (kept for context, since model choice has dominated this
+ * product's debugging budget):
  *
- *   v1 — fal-ai/flux-pro/v1/canny: edge-only text-to-image, repainted
- *        materials and reinterpreted exteriors as interiors. Removed.
+ *   v1 — fal-ai/flux-pro/v1/canny       (text-to-image only, removed)
+ *   v2 — fal-ai/flux-general/image-to-image + Canny  (transformation-only,
+ *        no "sharpen without redesign" middle ground)
+ *   v3 — fal-ai/clarity-upscaler        (SD1.5, output indistinguishable
+ *        from source even with correct field names)
+ *   v4 — fal-ai/supir                   (SDXL restoration, weaker at
+ *        "invent rich texture" per research brief)
  *
- *   v2 — fal-ai/flux-general/image-to-image + Canny ControlNet: low
- *        strength = near-identical output, high strength = redesigned
- *        materials. No middle ground. Removed.
+ *   v5 (this file) — fal-ai/sdxl-controlnet-union/image-to-image
+ *        The rendair.ai recipe in turnkey form: SDXL base + multiple
+ *        ControlNets (Canny for edges, Depth for geometry) + img2img.
+ *        Both ControlNets feed from the SAME source URL with
+ *        canny_preprocess and depth_preprocess set to true so Fal runs
+ *        the preprocessors itself — we send one upload, get a dual-CN
+ *        pass. This is the architectural-viz industry standard
+ *        (Juggernaut XL / RealVisXL + Canny + Depth + img2img at
+ *        denoise ~0.55), packaged as a single endpoint.
  *
- *   v3 — fal-ai/clarity-upscaler: SD1.5-based Magnific clone. After
- *        4 rounds of recalibration (R6..R9) the model is reachable
- *        and the field names are correct, but the user reports the
- *        output still looks indistinguishable from the source. SD1.5
- *        backbone is materially weaker than SDXL for "make CG photo-
- *        real" — published Magnific recipes get away with it via
- *        very specific scheduler + denoise combinations we can't
- *        fully tune through the Fal wrapper.
+ *   Provider class `name` stays "fal-controlnet" across every model
+ *   version — provider-registry.ts and the user's .env both reference
+ *   that exact string. R6 broke this once already (rename → silent
+ *   mock-fallback for several sprints).
  *
- *   v4 (this file) — fal-ai/supir: SDXL-based image restoration model
- *        in the same family as Magnific's higher-tier "Precision V2"
- *        stack. Designed exactly for "low-quality / synthetic input
- *        → photoreal output while respecting content". Heavier than
- *        Clarity (30–60 s typical wall-clock), which is itself a good
- *        signal that the model is actually running — Clarity's sub-
- *        second returns were the first hint that something was wrong
- *        upstream of the model.
- *
- * Server-side logging is loud on purpose now: after several rounds of
- * "results look the same", we cannot afford a silent mock-fallback
- * regression to go unnoticed again. Every Fal call prints model +
- * params + wall-clock to the dev server terminal.
+ * Server-side logging stays loud: every call prints model + params +
+ * wall-clock so any future regression of the silent-mock class is
+ * visible at the very first request in the dev server terminal.
  */
 
 import path from "path";
@@ -51,20 +48,26 @@ import type {
   ProviderGenerateResult,
 } from "./provider-adapter";
 
-const DEFAULT_MODEL = process.env.FAL_MODEL ?? "fal-ai/supir";
+const DEFAULT_MODEL =
+  process.env.FAL_MODEL ?? "fal-ai/sdxl-controlnet-union/image-to-image";
+
 /**
- * SUPIR upsampling ratio. 2 is the standard restoration ratio: the
- * model paints detail into a 2× canvas, then sharp downscales back to
- * source dimensions (the painted detail survives the resample as
- * visibly sharper texture at the user's resolution).
+ * ControlNet conditioning scale. 0.5 is Fal's documented default; 0.6
+ * is firmer for the architectural use case where we cannot afford the
+ * building outline to drift even slightly. Above 0.8 the result starts
+ * to look "traced" — preserving edges so rigidly that the surrounding
+ * denoise can't actually transform materials.
  */
-const DEFAULT_UPSAMPLING_RATIO = Number(process.env.FAL_UPSAMPLING_RATIO ?? "2");
+const DEFAULT_CONTROLNET_SCALE = Number(
+  process.env.FAL_CONTROLNET_SCALE ?? "0.6"
+);
+
 /**
- * "Q" (Quality) mode in SUPIR: aggressive restoration with detail
- * invention. "F" (Fidelity) sticks closer to source but adds less
- * material detail. For CG-render → photoreal, Q is the right tier.
+ * Inference steps. SDXL Union docs default to 35. 30 gives near-
+ * identical quality at noticeably lower latency.
  */
-const DEFAULT_MODEL_TYPE = process.env.FAL_MODEL_TYPE ?? "Q";
+const DEFAULT_INFERENCE_STEPS = Number(process.env.FAL_INFERENCE_STEPS ?? "30");
+const DEFAULT_GUIDANCE_SCALE = Number(process.env.FAL_GUIDANCE_SCALE ?? "7.5");
 
 let configured = false;
 
@@ -98,13 +101,8 @@ type FalSubscribeResponse = {
 };
 
 export class FalAiProvider implements ProviderAdapter {
-  // Identifier kept stable across model changes (v1..v4) because
-  // provider-registry.ts and the user's .env both reference this
-  // exact string. R6's rename to "fal-clarity-upscaler" silently
-  // broke resolveProvider — every generation routed to mock for
-  // multiple sprints. The label can evolve; the name cannot.
   readonly name = "fal-controlnet";
-  readonly label = "Fal.ai SUPIR (Architectural Photo Restoration)";
+  readonly label = "Fal.ai SDXL ControlNet Union (Architectural Photo)";
 
   async generateRealismPass(
     input: ProviderGenerateInput
@@ -112,17 +110,17 @@ export class FalAiProvider implements ProviderAdapter {
     ensureConfigured();
     const startedAt = Date.now();
 
+    // The workspace's "Kreativitás" slider (0.10..0.70 in the UI) is
+    // passed directly as the SDXL img2img `strength` — the documented
+    // denoise sweet spot for arch viz "preserve scene, transform
+    // materials" sits at 0.50..0.60 and the slider lives in that
+    // range. Fal's documented `strength` default is 0.95, which would
+    // be far too transformative (full redesign).
     const settings = (input.prompt.settings ?? {}) as Record<string, unknown>;
-    // SUPIR doesn't expose Clarity's `creativity` knob directly; the
-    // CFG scale (s_cfg_end) is the closest analogue. The workspace
-    // slider stays 0.10..0.70; we map it to s_cfg_end 4..9 (SUPIR's
-    // documented range), with the slider's 0.55 mid-point landing
-    // around s_cfg=6.5 which is the published sweet spot.
     const rawCreativity = Number(settings.creativity);
-    const clampedCreativity = Number.isFinite(rawCreativity)
+    const strength = Number.isFinite(rawCreativity)
       ? Math.min(0.7, Math.max(0.1, rawCreativity))
       : 0.55;
-    const sCfgEnd = 4 + clampedCreativity * (9 - 4) * (1 / 0.7);
 
     // ── 1. Read source ────────────────────────────────────────────────────
     const imageBytes = await readStoredFile(input.sourcePath);
@@ -142,18 +140,20 @@ export class FalAiProvider implements ProviderAdapter {
     );
     const sourceUrl = await fal.storage.upload(sourceFile);
 
-    // ── 3. Build prompt ───────────────────────────────────────────────────
-    // Photograph-first pattern (camera + materials + atmosphere), not
-    // scene-first — describing the SCENE invites redesign of its
-    // contents, describing the PHOTO steers the model to repaint
-    // surfaces while preserving layout.
+    // ── 3. Prompt: photograph-first pattern ──────────────────────────────
+    // The published Magnific / rendair-style positive-prompt template:
+    // lead with camera + lens + film grain (steers the model toward a
+    // PHOTOGRAPH), then list the architectural surface materials we
+    // want to see (steers the denoise to repaint THOSE surfaces), then
+    // atmosphere (light, haze, shadows). Scene nouns are deliberately
+    // avoided — they give the model permission to redesign.
     const promptParts: string[] = [
-      "professional architectural exterior photography",
-      "shot on Hasselblad H6D, 85mm prime lens, fine grain",
-      "weathered concrete with visible porosity, brushed aluminum panels with seam highlights",
-      "asphalt aggregate, blade-level grass texture, real glass reflections",
-      "late afternoon natural sun, atmospheric haze, soft contact shadows, ambient occlusion",
-      "ultra realistic materials, photorealistic, sharp focus, 8k, masterpiece",
+      "professional architectural exterior photography, photorealistic",
+      "shot on Hasselblad H6D-400c, 85mm prime lens, sharp focus, fine grain",
+      "weathered concrete with visible porosity, brushed aluminum sandwich panels with seam highlights, asphalt with realistic aggregate and tyre marks",
+      "blade-level grass with colour variation, real glass with subtle sky reflections",
+      "late afternoon natural sun, atmospheric haze between camera and building, soft contact shadows, ambient occlusion in eaves",
+      "ultra realistic materials, 8k resolution, masterpiece",
     ];
     if (input.prompt.presetName && input.prompt.presetName !== "custom") {
       promptParts.push(`style hint: ${input.prompt.presetName}`);
@@ -163,51 +163,65 @@ export class FalAiProvider implements ProviderAdapter {
     }
     const prompt = promptParts.join(", ");
 
-    // Negative prompt — keywords that describe the INPUT push the
-    // diffusion AWAY from the CG-look the source has.
+    // Negative prompt — keywords describing the INPUT (cgi, render,
+    // plastic, smooth) push the diffusion AWAY from the CG look the
+    // source has. Without these the model preserves the cg-plastic
+    // appearance because nothing told it not to.
     const userNegative =
       typeof settings.negativePrompt === "string" && settings.negativePrompt.trim()
         ? `${settings.negativePrompt.trim()}, `
         : "";
     const negativePrompt =
       userNegative +
-      "cgi, 3d render, computer graphics, video game, unreal engine, " +
-      "plastic, smooth surface, oversaturated, flat colours, " +
+      "cgi, 3d render, computer graphics, video game, unreal engine, twinmotion, lumion, " +
+      "plastic, smooth surface, oversaturated, flat colours, sterile, perfect, " +
       "painting, illustration, drawing, cartoon, anime, fantasy, " +
       "redesigned building, deformed geometry, extra windows, missing windows, " +
       "changed building shape, different roof material, repainted facade, " +
       "new vehicles, new people, added decoration, removed decoration, " +
       "watermark, sample text, letters, typography, logo, signature, " +
-      "low quality, worst quality, blurry";
+      "low quality, worst quality, blurry, jpeg artifacts";
 
     const seed = Math.floor(Math.random() * 2 ** 31);
 
-    const supirInput = {
+    // SDXL ControlNet Union accepts the same source image as Canny
+    // AND Depth control simultaneously. canny_preprocess / depth_preprocess
+    // set to true tells Fal to run the preprocessors itself, so we
+    // upload one image and get a true dual-ControlNet pass — the
+    // rendair-style recipe in a single HTTP round-trip.
+    const sdxlInput = {
       image_url: sourceUrl,
       prompt,
       negative_prompt: negativePrompt,
-      upsampling_ratio: DEFAULT_UPSAMPLING_RATIO,
-      model_type: DEFAULT_MODEL_TYPE,
-      s_cfg_end: Number(sCfgEnd.toFixed(2)),
+      canny_image_url: sourceUrl,
+      canny_preprocess: true,
+      depth_image_url: sourceUrl,
+      depth_preprocess: true,
+      strength,
+      controlnet_conditioning_scale: DEFAULT_CONTROLNET_SCALE,
+      guidance_scale: DEFAULT_GUIDANCE_SCALE,
+      num_inference_steps: DEFAULT_INFERENCE_STEPS,
       seed,
     };
 
-    // ── 4. Call SUPIR — with loud logging ─────────────────────────────────
+    // ── 4. Call Fal — loud logging on input ──────────────────────────────
     console.log(
       `[fal-provider] → Calling ${DEFAULT_MODEL} (project=${input.projectId.slice(0, 8)}…) with:`,
       {
-        upsampling_ratio: supirInput.upsampling_ratio,
-        model_type: supirInput.model_type,
-        s_cfg_end: supirInput.s_cfg_end,
-        creativity_slider: clampedCreativity,
-        seed: supirInput.seed,
+        strength: sdxlInput.strength,
+        controlnet_conditioning_scale: sdxlInput.controlnet_conditioning_scale,
+        guidance_scale: sdxlInput.guidance_scale,
+        num_inference_steps: sdxlInput.num_inference_steps,
+        controlnets: "canny+depth (both from source)",
+        creativity_slider: strength,
+        seed: sdxlInput.seed,
         prompt_chars: prompt.length,
         negative_chars: negativePrompt.length,
       }
     );
 
     const result = (await fal.subscribe(DEFAULT_MODEL, {
-      input: supirInput,
+      input: sdxlInput,
       logs: false,
     })) as FalSubscribeResponse;
 
@@ -236,18 +250,21 @@ export class FalAiProvider implements ProviderAdapter {
     }
     const rawGeneratedBytes = Buffer.from(await downloadResponse.arrayBuffer());
 
-    // ── 5b. Downscale to source dimensions ───────────────────────────────
+    // ── 5b. Match source dimensions ───────────────────────────────────────
+    // SDXL Union outputs at its own preferred resolution; we resample
+    // back to source dimensions so the user gets matched-resolution
+    // before/after for the comparison slider.
     const sourceMeta = await sharp(imageBytes).metadata();
     const targetWidth = sourceMeta.width ?? input.sourceWidth;
     const targetHeight = sourceMeta.height ?? input.sourceHeight;
     let generatedBytes: Buffer = rawGeneratedBytes;
-    let downscaledFrom: { width: number; height: number } | null = null;
+    let resampledFrom: { width: number; height: number } | null = null;
     if (targetWidth && targetHeight) {
-      const upscaled = await sharp(rawGeneratedBytes).metadata();
+      const got = await sharp(rawGeneratedBytes).metadata();
       if (
-        upscaled.width &&
-        upscaled.height &&
-        (upscaled.width !== targetWidth || upscaled.height !== targetHeight)
+        got.width &&
+        got.height &&
+        (got.width !== targetWidth || got.height !== targetHeight)
       ) {
         generatedBytes = Buffer.from(
           await sharp(rawGeneratedBytes)
@@ -258,7 +275,7 @@ export class FalAiProvider implements ProviderAdapter {
             .jpeg({ quality: 92 })
             .toBuffer()
         );
-        downscaledFrom = { width: upscaled.width, height: upscaled.height };
+        resampledFrom = { width: got.width, height: got.height };
       }
     }
 
@@ -266,14 +283,14 @@ export class FalAiProvider implements ProviderAdapter {
     const saved = await writeGeneratedVersionBuffer({
       projectId: input.projectId,
       sourcePath: input.sourcePath,
-      versionLabel: "fal-supir-realism-pass",
+      versionLabel: "fal-sdxl-controlnet-union-realism-pass",
       bytes: generatedBytes,
     });
 
     const totalMs = Date.now() - startedAt;
     console.log(
       `[fal-provider] ✓ Persisted to ${saved.filePath} (Fal ${falWallClockMs} ms, ` +
-        `total ${totalMs} ms${downscaledFrom ? `, downscaled from ${downscaledFrom.width}×${downscaledFrom.height}` : ""})`
+        `total ${totalMs} ms${resampledFrom ? `, resampled from ${resampledFrom.width}×${resampledFrom.height}` : ""})`
     );
 
     return {
@@ -282,17 +299,19 @@ export class FalAiProvider implements ProviderAdapter {
         provider: this.name,
         model: DEFAULT_MODEL,
         promptUsed: prompt,
-        creativitySlider: clampedCreativity,
-        sCfgEnd: supirInput.s_cfg_end,
-        upsamplingRatio: DEFAULT_UPSAMPLING_RATIO,
-        modelType: DEFAULT_MODEL_TYPE,
-        seed: result.data?.seed ?? supirInput.seed,
+        creativitySlider: strength,
+        strength,
+        controlnetConditioningScale: DEFAULT_CONTROLNET_SCALE,
+        controlnets: "canny+depth",
+        guidanceScale: DEFAULT_GUIDANCE_SCALE,
+        inferenceSteps: DEFAULT_INFERENCE_STEPS,
+        seed: result.data?.seed ?? sdxlInput.seed,
         timings: result.data?.timings ?? null,
         generatedUrl: generated.url,
         generatedWidth: generated.width ?? null,
         generatedHeight: generated.height ?? null,
-        downscaledFromWidth: downscaledFrom?.width ?? null,
-        downscaledFromHeight: downscaledFrom?.height ?? null,
+        resampledFromWidth: resampledFrom?.width ?? null,
+        resampledFromHeight: resampledFrom?.height ?? null,
         requestId: result.requestId ?? null,
         falWallClockMs,
       },
