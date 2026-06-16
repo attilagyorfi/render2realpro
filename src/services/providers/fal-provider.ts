@@ -40,6 +40,7 @@
 import path from "path";
 
 import { fal } from "@fal-ai/client";
+import sharp from "sharp";
 
 import {
   readStoredFile,
@@ -71,12 +72,20 @@ const DEFAULT_CREATIVITY = Number(process.env.FAL_CREATIVITY ?? "0.55");
  */
 const DEFAULT_RESEMBLANCE = Number(process.env.FAL_RESEMBLANCE ?? "1.2");
 /**
- * No upscale by default. The previous 2× behaviour was producing larger
- * files than needed without solving the user's actual ask (texture
- * realism, not pixel count). 1× keeps output at source resolution and
- * still gets all the Clarity detail-rework on existing pixels.
+ * SUPIR/Clarity-family models perform detail enhancement AS PART OF
+ * the upscale step — at upscale_factor=1 the pipeline effectively
+ * no-ops and the model returns the source in a few seconds without
+ * adding any texture detail. The texture-realism behaviour the user
+ * wants only emerges when the model has more pixels to paint into.
+ *
+ * To keep the user's "no upscale" expectation (same output dimensions
+ * as the source, same file size budget), the post-download step below
+ * downscales the 2× Clarity output back to the source dimensions with
+ * a high-quality Lanczos resample. The detail Clarity painted at 2×
+ * survives the downscale as visibly sharper micro-texture at the
+ * original resolution.
  */
-const DEFAULT_UPSCALE_FACTOR = Number(process.env.FAL_UPSCALE_FACTOR ?? "1");
+const DEFAULT_UPSCALE_FACTOR = Number(process.env.FAL_UPSCALE_FACTOR ?? "2");
 /**
  * Always the strongest mode. The previous low/medium/high selector was
  * not solving a real problem — users want the best result every time,
@@ -224,7 +233,38 @@ export class FalAiProvider implements ProviderAdapter {
         `Fal.ai download failed: ${downloadResponse.status} ${downloadResponse.statusText} (${generated.url})`
       );
     }
-    const generatedBytes = Buffer.from(await downloadResponse.arrayBuffer());
+    const rawGeneratedBytes = Buffer.from(await downloadResponse.arrayBuffer());
+
+    // ── 5b. Downscale 2× output back to source resolution ─────────────────
+    // Clarity emits at 2× the source so its detail pipeline actually
+    // runs (at 1× it no-ops in a few seconds). We then resample down
+    // to the source dimensions so the user sees an output at the same
+    // resolution they uploaded — the painted detail survives the
+    // Lanczos downscale and presents as visibly sharper texture.
+    const sourceMeta = await sharp(imageBytes).metadata();
+    const targetWidth = sourceMeta.width ?? input.sourceWidth;
+    const targetHeight = sourceMeta.height ?? input.sourceHeight;
+    let generatedBytes: Buffer = rawGeneratedBytes;
+    let downscaledFrom: { width: number; height: number } | null = null;
+    if (targetWidth && targetHeight) {
+      const upscaled = await sharp(rawGeneratedBytes).metadata();
+      if (
+        upscaled.width &&
+        upscaled.height &&
+        (upscaled.width !== targetWidth || upscaled.height !== targetHeight)
+      ) {
+        generatedBytes = Buffer.from(
+          await sharp(rawGeneratedBytes)
+            .resize(targetWidth, targetHeight, {
+              kernel: sharp.kernel.lanczos3,
+              fit: "fill",
+            })
+            .jpeg({ quality: 92 })
+            .toBuffer()
+        );
+        downscaledFrom = { width: upscaled.width, height: upscaled.height };
+      }
+    }
 
     // ── 6. Persist under storageRoot ───────────────────────────────────────
     const saved = await writeGeneratedVersionBuffer({
@@ -250,6 +290,8 @@ export class FalAiProvider implements ProviderAdapter {
         generatedUrl: generated.url,
         generatedWidth: generated.width ?? null,
         generatedHeight: generated.height ?? null,
+        downscaledFromWidth: downscaledFrom?.width ?? null,
+        downscaledFromHeight: downscaledFrom?.height ?? null,
         requestId: result.requestId ?? null,
       },
       processingTimeMs: Date.now() - startedAt,
