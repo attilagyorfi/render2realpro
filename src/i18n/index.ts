@@ -274,7 +274,7 @@ const en = {
   "settings.providerDescription":
     "Fal.ai Flux ControlNet and Mock generation use the same stable adapter boundary.",
   "settings.providerBody":
-    "Set FAL_KEY and RENDER2REAL_API_URL in .env to connect to the Fal.ai generation backend.",
+    "Set FAL_KEY in .env to connect to the Fal.ai generation backend.",
   "settings.integrations": "Cloud and email integrations",
   "settings.integrationsDescription":
     "Google Drive, OneDrive, Gmail, and Outlook are modeled as future export destinations.",
@@ -542,7 +542,7 @@ const hu: Record<TranslationKey, string> = {
   "settings.providerDescription":
     "A Fal.ai Flux ControlNet és a mock generálás ugyanazt a stabil adapterhatárt használja.",
   "settings.providerBody":
-    "Állítsd be a FAL_KEY és RENDER2REAL_API_URL értékeket a .env fájlban a Fal.ai generáló háttérszolgáltatás csatlakoztatásához.",
+    "Állítsd be a FAL_KEY értéket a .env fájlban a Fal.ai generáló háttérszolgáltatás csatlakoztatásához.",
   "settings.integrations": "Felhő és email integrációk",
   "settings.integrationsDescription":
     "A Google Drive, OneDrive, Gmail és Outlook jövőbeli export célként vannak modellezve.",

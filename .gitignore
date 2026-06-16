@@ -48,6 +48,10 @@ next-env.d.ts
 # Runtime asset storage at repo root only — do NOT match src/services/storage/
 /storage/
 
+# Eval harness output (R12 / Phase 0). Source images in eval/golden/ ARE
+# tracked; only the generated result folders are ignored.
+/eval/results/
+
 # any local SQLite databases (legacy from the SQLite era — repo runs on Postgres now)
 *.db
 *.db-journal

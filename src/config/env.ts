@@ -46,10 +46,6 @@ export const appEnv = {
   providerApiKey:
     process.env.RENDER2REAL_PROVIDER_API_KEY ?? process.env.OPENAI_API_KEY ?? "",
   openAiImageModel: process.env.OPENAI_IMAGE_MODEL ?? "gpt-image-1",
-  // Optional URL of the legacy render2real-api FastAPI service. Only the
-  // texture-targeting inpainting feature still references it; the main
-  // realism-pass pipeline now talks to Fal.ai directly via @fal-ai/client.
-  render2realApiUrl: process.env.RENDER2REAL_API_URL ?? "http://localhost:8000",
   // Fal.ai API key, consumed directly by fal-provider.ts.
   falKey: process.env.FAL_KEY ?? "",
   // Public origin used to build absolute URLs inside transactional

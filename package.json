@@ -17,7 +17,8 @@
     "db:push": "prisma db push",
     "db:seed": "node prisma/seed.js",
     "db:migrate-profiles": "node scripts/migrate-profiles-to-db.js",
-    "optimize:images": "node scripts/optimize-public-images.js"
+    "optimize:images": "node scripts/optimize-public-images.js",
+    "eval": "node scripts/eval-pipeline.js"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
