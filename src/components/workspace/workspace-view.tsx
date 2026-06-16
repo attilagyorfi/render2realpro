@@ -309,20 +309,16 @@ function ZoomableImagePanel({
 function GeneratingOverlay({
   language,
   startedAt,
-  quality = "medium",
   onCancel,
 }: {
   language: string;
   startedAt: number;
-  quality?: "low" | "medium" | "high";
   onCancel?: () => void;
 }) {
-  // Heuristic progress, calibrated to the flux-general/image-to-image
-  // pipeline measured via scripts/fal-smoke-test.js: ~7s model time
-  // plus upload/download overhead. The old values (90–210s) were tuned
-  // for the long-dead Canny text-to-image path and made the bar look
-  // stuck at 95% for minutes (2026-06-12 audit P0.6).
-  const ESTIMATED_TOTAL_MS = quality === "low" ? 15_000 : quality === "high" ? 40_000 : 25_000;
+  // Single fixed estimate for the always-strongest Clarity Upscaler
+  // run (~35s in practice). R7 dropped the low/medium/high selector,
+  // so the per-quality branching here is gone too.
+  const ESTIMATED_TOTAL_MS = 35_000;
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
@@ -535,21 +531,17 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
   // (never read before the first onMutate call), avoiding an impure Date.now()
   // call during render.
   const [generationStartedAt, setGenerationStartedAt] = useState<number>(0);
-  // Optional creative upscaling (2x via fal-ai/creative-upscaler)
-  const [enableUpscaling, setEnableUpscaling] = useState(false);
-  const [generationQuality, setGenerationQuality] = useState<"low" | "medium" | "high">("medium");
   const [presetEnabled, setPresetEnabled] = useState(false);
   // ── Advanced generation controls (redesign ② section) ──────────────
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [negativePrompt, setNegativePrompt] = useState("");
-  // Clarity Upscaler's `creativity` knob. 0.35 = Clarity's documented
-  // default — sharpens the source and adds plausible micro-detail
-  // (concrete porosity, panel seams, blade-level grass) without
-  // inventing new elements. Values above ~0.6 start hallucinating
-  // detail the source never implied, so the slider is bounded to
-  // 0.1..0.7 below.
-  const [creativity, setCreativity] = useState(0.35);
+  // Clarity Upscaler's `creativity` knob. 0.55 = the R7-recalibrated
+  // default after user feedback that 0.35 produced great lighting but
+  // visibly left materials untouched. 0.55 actually reworks textures
+  // (concrete porosity, panel seams, asphalt aggregate) without
+  // crossing the hallucination line. Slider is bounded to 0.10..0.70.
+  const [creativity, setCreativity] = useState(0.55);
   const [newPresetDialogOpen, setNewPresetDialogOpen] = useState(false);
   const [newPresetName, setNewPresetName] = useState("");
   const [isSavingPreset, setIsSavingPreset] = useState(false);
@@ -701,8 +693,6 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
           customPrompt: customPromptEnabled ? customPromptText : undefined,
           providerOverride,
           settingsOverride: {
-            enableUpscaling,
-            quality: generationQuality,
             creativity,
             negativePrompt: negativePrompt.trim() || undefined,
           },
@@ -927,8 +917,10 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
   const [ctaProgress, setCtaProgress] = useState(0);
   useEffect(() => {
     if (!isGenerating) return;
-    const totalMs =
-      generationQuality === "low" ? 15_000 : generationQuality === "high" ? 40_000 : 25_000;
+    // Always-max-quality Clarity run ≈ 35s in practice on the warehouse
+    // reference renders. The single fixed estimate replaces the earlier
+    // quality-dependent 15/25/40s map (R7 dropped the quality selector).
+    const totalMs = 35_000;
     const tick = () => {
       const raw = Math.min(0.95, (Date.now() - generationStartedAt) / totalMs);
       setCtaProgress(Math.round(Math.pow(raw, 0.55) * 95));
@@ -936,7 +928,7 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
     tick();
     const id = setInterval(tick, 500);
     return () => clearInterval(id);
-  }, [isGenerating, generationStartedAt, generationQuality]);
+  }, [isGenerating, generationStartedAt]);
 
   // Compute CSS filter string from editor values for live preview
   const filterStyle = useMemo(() => {
@@ -1444,7 +1436,6 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                   <GeneratingOverlay
                     language={language}
                     startedAt={generationStartedAt}
-                    quality={generationQuality}
                     onCancel={() => generateAbortRef.current?.abort()}
                   />
                 )}
@@ -1617,58 +1608,16 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
 
                   <Separator />
 
-                  {/* ── ① INPUT · QUALITY ─────────────────────────────────── */}
-                  <div className="flex flex-col gap-2">
-                    <div className="text-xs font-medium text-zinc-400">
-                      {language === "hu" ? "Generálás minősége" : "Generation quality"}
-                    </div>
-                    <div className="flex gap-2">
-                      {(["low", "medium", "high"] as const).map((q) => (
-                        <button
-                          key={q}
-                          type="button"
-                          onClick={() => setGenerationQuality(q)}
-                          className={`flex-1 rounded-md border px-2 py-1.5 text-xs font-medium transition-colors ${
-                            generationQuality === q
-                              ? "border-violet-500 bg-violet-500/20 text-violet-300"
-                              : "border-white/10 bg-white/5 text-zinc-400 hover:border-white/20 hover:text-zinc-300"
-                          }`}
-                        >
-                          {q === "low"
-                            ? (language === "hu" ? "Gyors" : "Fast")
-                            : q === "medium"
-                            ? (language === "hu" ? "Közepes" : "Medium")
-                            : (language === "hu" ? "Magas" : "High")}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="text-[0.65rem] text-zinc-600">
-                      {generationQuality === "low"
-                        ? (language === "hu" ? "~15 másodperc" : "~15 seconds")
-                        : generationQuality === "medium"
-                        ? (language === "hu" ? "~25 másodperc" : "~25 seconds")
-                        : (language === "hu" ? "~40 másodperc" : "~40 seconds")}
-                    </div>
-                  </div>
-                  <Separator />
-                  {/* ── UPSCALING TOGGLE ───────────────────────────────────────────────── */}
-                  <div className="flex flex-col gap-3">
-                    <label className="flex cursor-pointer items-center gap-3">
-                      <div className="relative shrink-0">
-                        <input type="checkbox" className="sr-only" checked={enableUpscaling} onChange={(e) => setEnableUpscaling(e.target.checked)} />
-                        <div className={`h-5 w-9 rounded-full border transition-colors ${enableUpscaling ? "border-violet-500/50 bg-violet-500" : "border-white/20 bg-white/10"}`} />
-                        <div className={`absolute top-0.5 size-4 rounded-full bg-white shadow transition-transform ${enableUpscaling ? "translate-x-4" : "translate-x-0.5"}`} />
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium text-zinc-200">
-                          {language === "hu" ? "2× Upscaling" : "2× Upscaling"}
-                        </div>
-                        <div className="text-xs text-zinc-500">
-                          {language === "hu" ? "Kreátív részletjavítás (lassabb)" : "Creative detail enhancement (slower)"}
-                        </div>
-                      </div>
-                    </label>
-                  </div>
+                  {/* R7: The "Generation quality" three-button selector
+                     (low/medium/high) and the "2× Upscaling" toggle
+                     were removed here. The realism pass now always
+                     runs Clarity at full strength (30 inference steps,
+                     1× scale) — a single automatic mode is what the
+                     user actually wants, not a knob that trades
+                     quality for speed. The Kreativitás slider in the
+                     Advanced section below remains the only per-run
+                     knob, since that one expresses a creative choice
+                     (faithful vs. detail-rich), not a quality trade. */}
 
                   {/* ── ② ADVANCED SETTINGS (collapsed accordion) ─────────── */}
                   <div className="rounded-[18px] border border-white/8 bg-white/3">

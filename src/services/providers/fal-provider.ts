@@ -54,26 +54,37 @@ import type {
 
 const DEFAULT_MODEL = process.env.FAL_MODEL ?? "fal-ai/clarity-upscaler";
 /**
- * Clarity's `creativity` knob: 0 = pure sharpening, no new detail; ~0.35
- * = Clarity's documented default, adds plausible micro-texture on
- * surfaces; >0.6 starts inventing detail the source never implied.
- * 0.35 is the safest first-run experience for architectural CG renders.
+ * Clarity's `creativity` knob: 0 = pure sharpening, no new detail; >0.6
+ * starts inventing detail the source never implied. The first Clarity
+ * default of 0.35 produced beautiful lighting changes but visibly left
+ * concrete / metal / asphalt textures untouched. 0.55 is the recalibrated
+ * default: enough creative budget for the model to actually repaint
+ * surface micro-detail (concrete porosity, panel seams, asphalt aggregate)
+ * while staying below the hallucination threshold.
  */
-const DEFAULT_CREATIVITY = Number(process.env.FAL_CREATIVITY ?? "0.35");
+const DEFAULT_CREATIVITY = Number(process.env.FAL_CREATIVITY ?? "0.55");
 /**
  * Clarity's `resemblance` knob (0..3 in the API). Higher = sticks closer
- * to the source pixels. 1.5 is the architectural sweet spot: noticeable
- * material upgrade, but the building outline / openings / vehicles /
- * vegetation positions all stay locked.
+ * to the source pixels. 1.5 was firm enough to lock building geometry
+ * but also smothered texture rework; 1.2 still pins composition while
+ * letting the higher creativity actually breathe on surfaces.
  */
-const DEFAULT_RESEMBLANCE = Number(process.env.FAL_RESEMBLANCE ?? "1.5");
+const DEFAULT_RESEMBLANCE = Number(process.env.FAL_RESEMBLANCE ?? "1.2");
 /**
- * 2× is the right default for architectural renders shown on a normal
- * monitor — enough resolution to make textures visible without 4× output
- * file sizes (which slow the comparison slider and balloon storage).
+ * No upscale by default. The previous 2× behaviour was producing larger
+ * files than needed without solving the user's actual ask (texture
+ * realism, not pixel count). 1× keeps output at source resolution and
+ * still gets all the Clarity detail-rework on existing pixels.
  */
-const DEFAULT_UPSCALE_FACTOR = Number(process.env.FAL_UPSCALE_FACTOR ?? "2");
-const DEFAULT_INFERENCE_STEPS = Number(process.env.FAL_INFERENCE_STEPS ?? "18");
+const DEFAULT_UPSCALE_FACTOR = Number(process.env.FAL_UPSCALE_FACTOR ?? "1");
+/**
+ * Always the strongest mode. The previous low/medium/high selector was
+ * not solving a real problem — users want the best result every time,
+ * not a knob that trades quality for speed. 30 steps is Clarity's
+ * effective ceiling for diminishing returns; beyond that the output
+ * stops getting better and just gets slower.
+ */
+const DEFAULT_INFERENCE_STEPS = Number(process.env.FAL_INFERENCE_STEPS ?? "30");
 const DEFAULT_GUIDANCE_SCALE = Number(process.env.FAL_GUIDANCE_SCALE ?? "4");
 
 let configured = false;
@@ -117,24 +128,15 @@ export class FalAiProvider implements ProviderAdapter {
     ensureConfigured();
     const startedAt = Date.now();
 
-    // The two per-generation knobs the workspace exposes:
-    //   creativity — Clarity's detail-add aggressiveness. Slider range
-    //                in the UI is 0.10..0.70; clamped here too for
-    //                safety against bad env overrides.
-    //   quality    — maps to Clarity inference steps. The Clarity
-    //                default is 18; low and high give the user a
-    //                speed/quality knob.
+    // Only `creativity` is per-generation now. The earlier `quality`
+    // (low/medium/high) selector was removed in R7 — every run uses
+    // the strongest setting (DEFAULT_INFERENCE_STEPS = 30).
     const settings = (input.prompt.settings ?? {}) as Record<string, unknown>;
     const rawCreativity = Number(settings.creativity);
     const creativity = Number.isFinite(rawCreativity)
       ? Math.min(0.7, Math.max(0.1, rawCreativity))
       : DEFAULT_CREATIVITY;
-    const steps =
-      settings.quality === "low"
-        ? 12
-        : settings.quality === "high"
-          ? 28
-          : DEFAULT_INFERENCE_STEPS;
+    const steps = DEFAULT_INFERENCE_STEPS;
 
     // ── 1. Read source image (path-traversal checked) ──────────────────────
     const imageBytes = await readStoredFile(input.sourcePath);
