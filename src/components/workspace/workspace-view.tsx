@@ -543,9 +543,12 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [negativePrompt, setNegativePrompt] = useState("");
-  // Denoising strength exposed to the user. 0.4 = the calibrated
-  // architectural default; higher values let the model transform more.
-  const [creativity, setCreativity] = useState(0.4);
+  // Denoising strength exposed to the user. 0.55 matches the recalibrated
+  // architectural default in fal-provider (raised from 0.4 after the
+  // CG-warehouse tests showed the lower value produced near-identical
+  // output). Lower it for fragile geometry, raise it for bold material
+  // transformation.
+  const [creativity, setCreativity] = useState(0.55);
   const [newPresetDialogOpen, setNewPresetDialogOpen] = useState(false);
   const [newPresetName, setNewPresetName] = useState("");
   const [isSavingPreset, setIsSavingPreset] = useState(false);

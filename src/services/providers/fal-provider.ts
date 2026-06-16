@@ -18,12 +18,18 @@
  *                            white-concrete tones, the metal cladding,
  *                            the asphalt — not just outlines.
  *   - strength             → how aggressively the model is allowed to
- *                            deviate from the source pixels. 0.4 is the
- *                            architectural sweet spot: enough denoise
- *                            to add real material micro-detail, not so
- *                            much that materials get reinvented.
- *   - controlnets[Canny]   → keeps the geometry locked down even at the
- *                            small amount of denoise we DO allow.
+ *                            deviate from the source pixels. 0.55 is
+ *                            the architectural sweet spot at the current
+ *                            Canny weight: enough denoise to actually
+ *                            repaint CG-plastic surfaces with real
+ *                            photographed materials, not so much that
+ *                            the building geometry shifts.
+ *   - controlnets[Canny]   → keeps geometry pinned at every denoise
+ *                            step. Conditioning weight 0.45 is firm on
+ *                            the building outline without overpowering
+ *                            the denoise pass (the previous 0.65 made
+ *                            the result mirror the source pixel-for-
+ *                            pixel even when strength was raised).
  *
  * The prompt also gets dramatically shorter. With the image-to-image
  * pipeline, the model already knows what's in the scene; we don't need
@@ -48,23 +54,30 @@ import type {
 const DEFAULT_MODEL =
   process.env.FAL_MODEL ?? "fal-ai/flux-general/image-to-image";
 /**
- * How much of the source the model is allowed to overwrite. 0.4 means
- * "keep 60% of the source signal, repaint 40% with photoreal detail".
- * Going below 0.3 makes the change invisible; going above 0.6 starts
- * letting the model reinvent materials.
+ * How much of the source the model is allowed to overwrite. Earlier
+ * default of 0.4 left visible CG-render artefacts: white-plastic walls,
+ * flat-green grass, sterile asphalt — the model literally lacked enough
+ * denoise budget to repaint surfaces. 0.55 gives it room to redo the
+ * micro-detail layer (texture pores, blade-level grass, real road wear)
+ * without letting it redraw the building. Canny at DEFAULT_CONTROL_WEIGHT
+ * keeps geometry pinned at this strength.
  */
-const DEFAULT_STRENGTH = Number(process.env.FAL_STRENGTH ?? "0.4");
+const DEFAULT_STRENGTH = Number(process.env.FAL_STRENGTH ?? "0.55");
 /**
- * Canny ControlNet conditioning weight. 0.65 is firm without being so
- * rigid that the soft-denoise can't add material detail at all.
+ * Canny ControlNet conditioning weight. Dropped from 0.65 → 0.45: at
+ * 0.65 the edge map was overriding the model so hard that even with
+ * higher denoise the result mirrored the source pixel-for-pixel. 0.45
+ * still locks the building outline (verified on the warehouse smoke
+ * render) but lets the denoise actually breathe.
  */
-const DEFAULT_CONTROL_WEIGHT = Number(process.env.FAL_CONTROL_WEIGHT ?? "0.65");
+const DEFAULT_CONTROL_WEIGHT = Number(process.env.FAL_CONTROL_WEIGHT ?? "0.45");
 const DEFAULT_INFERENCE_STEPS = Number(process.env.FAL_INFERENCE_STEPS ?? "30");
 /**
- * Lower guidance now that the source image is the model's anchor —
- * the prompt only needs to whisper "photoreal" rather than shout it.
+ * Slight bump (3.5 → 4.0) so the photoreal-transformation prompt has
+ * enough pull at the higher denoise. Still well below the 7+ range that
+ * causes flux to over-saturate and posterise.
  */
-const DEFAULT_GUIDANCE_SCALE = Number(process.env.FAL_GUIDANCE_SCALE ?? "3.5");
+const DEFAULT_GUIDANCE_SCALE = Number(process.env.FAL_GUIDANCE_SCALE ?? "4.0");
 /**
  * Canny ControlNet weights on Fal. controlnets[].path expects a
  * HuggingFace repo slug in DIFFUSERS format. Two earlier values failed
@@ -166,13 +179,17 @@ export class FalAiProvider implements ProviderAdapter {
     const sourceUrl = await fal.storage.upload(sourceFile);
 
     // ── 3. Build prompt ────────────────────────────────────────────────────
-    // Now that the model has the source pixels AND a Canny ControlNet,
-    // the prompt's job is to add intent ("photoreal exterior, slight
-    // material refinement"), not to enforce preservation. The Canny
-    // controlnet + low strength handle preservation structurally.
+    // The earlier prompt ("subtly improve … keep every element exactly as
+    // in the source") was, in effect, asking the model to do nothing —
+    // and combined with strength 0.4 + Canny 0.65 the model obliged.
+    // The Canny ControlNet already enforces structural preservation; the
+    // prompt's job is to push hard on the *transformation* axis (CG →
+    // photograph) so the denoise budget gets spent on real materials,
+    // not on a slightly softer copy of the source.
     const promptParts: string[] = [
-      "Photorealistic architectural exterior photography, professional reference photo of an existing building, true-to-source materials, natural outdoor daylight, accurate contact shadows, atmospheric haze.",
-      "Subtly improve surface textures and lighting realism while keeping every building element, vehicle, vegetation, and material exactly as in the source.",
+      "Transform this CG architectural render into a real on-site photograph taken with a professional DSLR. Replace the plastic CG surfaces with real photographed materials: visible concrete porosity and grain on walls, real metal sandwich-panel seams with subtle specular highlights, individual blades of grass with colour variation instead of flat green plastic, asphalt with realistic aggregate, road wear, and tyre marks, and atmospheric depth-of-field haze between camera and building.",
+      "Realistic outdoor sun-and-sky illumination with soft contact shadows under the building footprint, ambient occlusion in the eaves and at the ground line, and faint dust on lower wall surfaces.",
+      "Preserve exactly: building outline, roof geometry, window and door positions, parked vehicle placement, vegetation placement, and the overall scene composition. Only the material quality, surface detail, and lighting realism change.",
     ];
     if (input.prompt.presetName && input.prompt.presetName !== "custom") {
       promptParts.push(`Preset: ${input.prompt.presetName}.`);
