@@ -1,40 +1,38 @@
 /**
  * fal-provider.ts — Realism-pass adapter for Fal.ai
  *
- * History (kept for context, since the model choice is the single most
+ * History (kept for context, since model choice is the single most
  * impactful knob in the whole product):
  *
- *   v1 — fal-ai/flux-pro/v1/canny: a pure text-to-image model that saw
- *        only the source's edge map. Without source pixels, it routinely
- *        repainted materials and even reinterpreted exteriors as
- *        interiors. Removed.
+ *   v1 — fal-ai/flux-pro/v1/canny: edge-only text-to-image, repainted
+ *        materials and reinterpreted exteriors as interiors. Removed.
  *
- *   v2 — fal-ai/flux-general/image-to-image + Canny ControlNet: image-
- *        to-image with structural ControlNet. Geometry stable, but the
- *        model is fundamentally a TRANSFORMATION pipeline — turning the
- *        denoise knob down (strength 0.4) made the output near-identical
- *        to the source; turning it up (strength 0.55–0.70) added
- *        real materials but at the cost of redesigning surfaces the user
- *        wanted preserved exactly. There is no setting on a flux img2img
- *        pipeline that means "sharpen and enrich the existing pixels
- *        without inventing new ones" — that is a different model class.
+ *   v2 — fal-ai/flux-general/image-to-image + Canny ControlNet: low
+ *        strength = near-identical output, high strength = redesigned
+ *        materials. No middle ground. Removed.
  *
- *   v3 (this file) — fal-ai/clarity-upscaler: a detail-enhancement /
- *        super-resolution model in the SUPIR / Magnific family. It does
- *        exactly what the architectural-visualisation use case needs:
- *        upscales the source 2× and adds real photographic micro-detail
- *        (concrete porosity, metal panel seams, blade-level grass,
- *        asphalt aggregate) on the SAME surfaces — it doesn't repaint or
- *        reinvent. The `resemblance` knob anchors output to the source
- *        far more strongly than any Canny weight could.
+ *   v3 — fal-ai/clarity-upscaler: SD1.5-based Magnific clone. After
+ *        4 rounds of recalibration (R6..R9) the model is reachable
+ *        and the field names are correct, but the user reports the
+ *        output still looks indistinguishable from the source. SD1.5
+ *        backbone is materially weaker than SDXL for "make CG photo-
+ *        real" — published Magnific recipes get away with it via
+ *        very specific scheduler + denoise combinations we can't
+ *        fully tune through the Fal wrapper.
  *
- * Notable behavioural shifts vs. v2:
- *   - Output resolution is ~2× the source (upscale_factor=2). The
- *     Before/After slider handles this transparently — both images are
- *     fit-to-container, aspect ratio is preserved.
- *   - The "Kreativitás" slider is now the model's `creativity` knob
- *     directly (0.1 = pure sharpening, 0.5+ = starts adding detail the
- *     source didn't have). Safe range narrowed to 0.10..0.70 in the UI.
+ *   v4 (this file) — fal-ai/supir: SDXL-based image restoration model
+ *        in the same family as Magnific's higher-tier "Precision V2"
+ *        stack. Designed exactly for "low-quality / synthetic input
+ *        → photoreal output while respecting content". Heavier than
+ *        Clarity (30–60 s typical wall-clock), which is itself a good
+ *        signal that the model is actually running — Clarity's sub-
+ *        second returns were the first hint that something was wrong
+ *        upstream of the model.
+ *
+ * Server-side logging is loud on purpose now: after several rounds of
+ * "results look the same", we cannot afford a silent mock-fallback
+ * regression to go unnoticed again. Every Fal call prints model +
+ * params + wall-clock to the dev server terminal.
  */
 
 import path from "path";
@@ -53,50 +51,20 @@ import type {
   ProviderGenerateResult,
 } from "./provider-adapter";
 
-const DEFAULT_MODEL = process.env.FAL_MODEL ?? "fal-ai/clarity-upscaler";
+const DEFAULT_MODEL = process.env.FAL_MODEL ?? "fal-ai/supir";
 /**
- * Clarity's `creativity` knob: 0 = pure sharpening, no new detail; >0.6
- * starts inventing detail the source never implied. The first Clarity
- * default of 0.35 produced beautiful lighting changes but visibly left
- * concrete / metal / asphalt textures untouched. 0.55 is the recalibrated
- * default: enough creative budget for the model to actually repaint
- * surface micro-detail (concrete porosity, panel seams, asphalt aggregate)
- * while staying below the hallucination threshold.
+ * SUPIR upsampling ratio. 2 is the standard restoration ratio: the
+ * model paints detail into a 2× canvas, then sharp downscales back to
+ * source dimensions (the painted detail survives the resample as
+ * visibly sharper texture at the user's resolution).
  */
-const DEFAULT_CREATIVITY = Number(process.env.FAL_CREATIVITY ?? "0.55");
+const DEFAULT_UPSAMPLING_RATIO = Number(process.env.FAL_UPSAMPLING_RATIO ?? "2");
 /**
- * Clarity's `resemblance` knob (0..3 in the API). Per the research
- * brief, 0.6 is the documented Clarity default and the value the
- * Magnific-style "make CG photoreal" recipes actually use — values
- * above 1.0 over-pin the source and smother the diffusion update.
- * The ControlNet Tile baked into Clarity already handles structural
- * preservation; resemblance only needs to nudge it, not enforce it.
+ * "Q" (Quality) mode in SUPIR: aggressive restoration with detail
+ * invention. "F" (Fidelity) sticks closer to source but adds less
+ * material detail. For CG-render → photoreal, Q is the right tier.
  */
-const DEFAULT_RESEMBLANCE = Number(process.env.FAL_RESEMBLANCE ?? "0.6");
-/**
- * SUPIR/Clarity-family models perform detail enhancement AS PART OF
- * the upscale step — at upscale_factor=1 the pipeline effectively
- * no-ops and the model returns the source in a few seconds without
- * adding any texture detail. The texture-realism behaviour the user
- * wants only emerges when the model has more pixels to paint into.
- *
- * To keep the user's "no upscale" expectation (same output dimensions
- * as the source, same file size budget), the post-download step below
- * downscales the 2× Clarity output back to the source dimensions with
- * a high-quality Lanczos resample. The detail Clarity painted at 2×
- * survives the downscale as visibly sharper micro-texture at the
- * original resolution.
- */
-const DEFAULT_UPSCALE_FACTOR = Number(process.env.FAL_UPSCALE_FACTOR ?? "2");
-/**
- * Always the strongest mode. The previous low/medium/high selector was
- * not solving a real problem — users want the best result every time,
- * not a knob that trades quality for speed. 30 steps is Clarity's
- * effective ceiling for diminishing returns; beyond that the output
- * stops getting better and just gets slower.
- */
-const DEFAULT_INFERENCE_STEPS = Number(process.env.FAL_INFERENCE_STEPS ?? "30");
-const DEFAULT_GUIDANCE_SCALE = Number(process.env.FAL_GUIDANCE_SCALE ?? "4");
+const DEFAULT_MODEL_TYPE = process.env.FAL_MODEL_TYPE ?? "Q";
 
 let configured = false;
 
@@ -130,15 +98,13 @@ type FalSubscribeResponse = {
 };
 
 export class FalAiProvider implements ProviderAdapter {
-  // Identifier kept stable across model changes (R6/R7/R8/R9) because
-  // provider-registry.ts advertises this exact string and the user's
-  // .env's RENDER2REAL_ACTIVE_PROVIDER also references it. When R6
-  // briefly changed this to "fal-clarity-upscaler" the resolveProvider
-  // name-match failed and EVERY generation silently fell through to
-  // MockLocalProvider — the user saw mock output for several sprints
-  // without realising. The label is fine to evolve; the name is not.
+  // Identifier kept stable across model changes (v1..v4) because
+  // provider-registry.ts and the user's .env both reference this
+  // exact string. R6's rename to "fal-clarity-upscaler" silently
+  // broke resolveProvider — every generation routed to mock for
+  // multiple sprints. The label can evolve; the name cannot.
   readonly name = "fal-controlnet";
-  readonly label = "Fal.ai Clarity Upscaler (Architectural Detail Pass)";
+  readonly label = "Fal.ai SUPIR (Architectural Photo Restoration)";
 
   async generateRealismPass(
     input: ProviderGenerateInput
@@ -146,17 +112,19 @@ export class FalAiProvider implements ProviderAdapter {
     ensureConfigured();
     const startedAt = Date.now();
 
-    // Only `creativity` is per-generation now. The earlier `quality`
-    // (low/medium/high) selector was removed in R7 — every run uses
-    // the strongest setting (DEFAULT_INFERENCE_STEPS = 30).
     const settings = (input.prompt.settings ?? {}) as Record<string, unknown>;
+    // SUPIR doesn't expose Clarity's `creativity` knob directly; the
+    // CFG scale (s_cfg_end) is the closest analogue. The workspace
+    // slider stays 0.10..0.70; we map it to s_cfg_end 4..9 (SUPIR's
+    // documented range), with the slider's 0.55 mid-point landing
+    // around s_cfg=6.5 which is the published sweet spot.
     const rawCreativity = Number(settings.creativity);
-    const creativity = Number.isFinite(rawCreativity)
+    const clampedCreativity = Number.isFinite(rawCreativity)
       ? Math.min(0.7, Math.max(0.1, rawCreativity))
-      : DEFAULT_CREATIVITY;
-    const steps = DEFAULT_INFERENCE_STEPS;
+      : 0.55;
+    const sCfgEnd = 4 + clampedCreativity * (9 - 4) * (1 / 0.7);
 
-    // ── 1. Read source image (path-traversal checked) ──────────────────────
+    // ── 1. Read source ────────────────────────────────────────────────────
     const imageBytes = await readStoredFile(input.sourcePath);
     const sourceExtension = path.extname(input.sourcePath).toLowerCase();
     const mimeType =
@@ -166,7 +134,7 @@ export class FalAiProvider implements ProviderAdapter {
           ? "image/webp"
           : "image/png";
 
-    // ── 2. Upload source to Fal storage (the model needs a URL) ────────────
+    // ── 2. Upload to Fal storage ─────────────────────────────────────────
     const sourceFile = new File(
       [new Uint8Array(imageBytes)],
       path.basename(input.sourcePath),
@@ -174,79 +142,75 @@ export class FalAiProvider implements ProviderAdapter {
     );
     const sourceUrl = await fal.storage.upload(sourceFile);
 
-    // ── 3. Build prompt ────────────────────────────────────────────────────
-    // Pattern from the research brief: describe the PHOTOGRAPH, not the
-    // SCENE. Listing scene nouns ("a warehouse", "trees", "a car") gives
-    // the model permission to redesign them; listing camera + materials
-    // + atmosphere steers it to repaint surfaces while the ControlNet
-    // Tile (baked into Clarity) preserves layout.
+    // ── 3. Build prompt ───────────────────────────────────────────────────
+    // Photograph-first pattern (camera + materials + atmosphere), not
+    // scene-first — describing the SCENE invites redesign of its
+    // contents, describing the PHOTO steers the model to repaint
+    // surfaces while preserving layout.
     const promptParts: string[] = [
-      "masterpiece, best quality, highres",
-      "professional architectural photography, photorealistic, ultra realistic materials",
-      "shot on Hasselblad H6D, 85mm lens, fine grain",
-      "weathered concrete with visible porosity, brushed aluminum panels with seam highlights, asphalt aggregate, blade-level grass texture, real glass reflections",
-      "late afternoon natural sun, subtle atmospheric haze, soft contact shadows, ambient occlusion in eaves",
+      "professional architectural exterior photography",
+      "shot on Hasselblad H6D, 85mm prime lens, fine grain",
+      "weathered concrete with visible porosity, brushed aluminum panels with seam highlights",
+      "asphalt aggregate, blade-level grass texture, real glass reflections",
+      "late afternoon natural sun, atmospheric haze, soft contact shadows, ambient occlusion",
+      "ultra realistic materials, photorealistic, sharp focus, 8k, masterpiece",
     ];
     if (input.prompt.presetName && input.prompt.presetName !== "custom") {
-      promptParts.push(`style: ${input.prompt.presetName}`);
+      promptParts.push(`style hint: ${input.prompt.presetName}`);
     }
     if (input.prompt.customDirectives?.length) {
       promptParts.push(...input.prompt.customDirectives);
     }
     const prompt = promptParts.join(", ");
 
-    // Negative prompt: keywords that describe the INPUT (cgi, render,
-    // plastic, smooth) are critical here — they push the diffusion
-    // AWAY from the CG look the source has. Without them the model
-    // happily preserves the cg-plastic appearance. Workspace-supplied
-    // negative is prepended for highest weight.
+    // Negative prompt — keywords that describe the INPUT push the
+    // diffusion AWAY from the CG-look the source has.
     const userNegative =
       typeof settings.negativePrompt === "string" && settings.negativePrompt.trim()
         ? `${settings.negativePrompt.trim()}, `
         : "";
     const negativePrompt =
       userNegative +
-      "(worst quality, low quality, normal quality:2), " +
       "cgi, 3d render, computer graphics, video game, unreal engine, " +
       "plastic, smooth surface, oversaturated, flat colours, " +
       "painting, illustration, drawing, cartoon, anime, fantasy, " +
       "redesigned building, deformed geometry, extra windows, missing windows, " +
       "changed building shape, different roof material, repainted facade, " +
       "new vehicles, new people, added decoration, removed decoration, " +
-      "watermark, sample text, letters, typography, logo, signature";
+      "watermark, sample text, letters, typography, logo, signature, " +
+      "low quality, worst quality, blurry";
 
-    // ── 4. Call Fal.ai — Clarity Upscaler ──────────────────────────────────
-    // Two field-name bugs fixed in R9 after the research brief:
-    //   - `upscale_factor` → `scale_factor` (the actual Fal schema name;
-    //     Fal silently ignored the unknown key, falling back to its
-    //     scale_factor=1 default — the no-op that returned the source
-    //     in seconds).
-    //   - explicit `downscaling: false` — without it Clarity sometimes
-    //     downscales then "upscales" back, collapsing tile count and
-    //     short-circuiting the diffusion pass.
-    // A fresh random seed per call also defeats any Fal-side cache
-    // hits keyed on (image, params) tuples.
     const seed = Math.floor(Math.random() * 2 ** 31);
+
+    const supirInput = {
+      image_url: sourceUrl,
+      prompt,
+      negative_prompt: negativePrompt,
+      upsampling_ratio: DEFAULT_UPSAMPLING_RATIO,
+      model_type: DEFAULT_MODEL_TYPE,
+      s_cfg_end: Number(sCfgEnd.toFixed(2)),
+      seed,
+    };
+
+    // ── 4. Call SUPIR — with loud logging ─────────────────────────────────
+    console.log(
+      `[fal-provider] → Calling ${DEFAULT_MODEL} (project=${input.projectId.slice(0, 8)}…) with:`,
+      {
+        upsampling_ratio: supirInput.upsampling_ratio,
+        model_type: supirInput.model_type,
+        s_cfg_end: supirInput.s_cfg_end,
+        creativity_slider: clampedCreativity,
+        seed: supirInput.seed,
+        prompt_chars: prompt.length,
+        negative_chars: negativePrompt.length,
+      }
+    );
+
     const result = (await fal.subscribe(DEFAULT_MODEL, {
-      input: {
-        image_url: sourceUrl,
-        prompt,
-        negative_prompt: negativePrompt,
-        creativity,
-        resemblance: DEFAULT_RESEMBLANCE,
-        scale_factor: DEFAULT_UPSCALE_FACTOR,
-        downscaling: false,
-        num_inference_steps: steps,
-        guidance_scale: DEFAULT_GUIDANCE_SCALE,
-        seed,
-        enable_safety_checker: false,
-      },
+      input: supirInput,
       logs: false,
     })) as FalSubscribeResponse;
 
-    // Clarity historically returned `image` (singular). Some Fal models
-    // in this family return `images` (array). Support both shapes so a
-    // schema tweak upstream doesn't break us silently.
     const generated = result.data?.image ?? result.data?.images?.[0];
     if (!generated?.url) {
       throw new Error(
@@ -256,7 +220,14 @@ export class FalAiProvider implements ProviderAdapter {
       );
     }
 
-    // ── 5. Download the generated image ────────────────────────────────────
+    const falWallClockMs = Date.now() - startedAt;
+    console.log(
+      `[fal-provider] ← ${DEFAULT_MODEL} returned after ${falWallClockMs} ms, ` +
+        `output URL ${generated.url.slice(0, 80)}…, ` +
+        `output ${generated.width ?? "?"}×${generated.height ?? "?"}`
+    );
+
+    // ── 5. Download ───────────────────────────────────────────────────────
     const downloadResponse = await fetch(generated.url);
     if (!downloadResponse.ok) {
       throw new Error(
@@ -265,12 +236,7 @@ export class FalAiProvider implements ProviderAdapter {
     }
     const rawGeneratedBytes = Buffer.from(await downloadResponse.arrayBuffer());
 
-    // ── 5b. Downscale 2× output back to source resolution ─────────────────
-    // Clarity emits at 2× the source so its detail pipeline actually
-    // runs (at 1× it no-ops in a few seconds). We then resample down
-    // to the source dimensions so the user sees an output at the same
-    // resolution they uploaded — the painted detail survives the
-    // Lanczos downscale and presents as visibly sharper texture.
+    // ── 5b. Downscale to source dimensions ───────────────────────────────
     const sourceMeta = await sharp(imageBytes).metadata();
     const targetWidth = sourceMeta.width ?? input.sourceWidth;
     const targetHeight = sourceMeta.height ?? input.sourceHeight;
@@ -296,13 +262,19 @@ export class FalAiProvider implements ProviderAdapter {
       }
     }
 
-    // ── 6. Persist under storageRoot ───────────────────────────────────────
+    // ── 6. Persist ────────────────────────────────────────────────────────
     const saved = await writeGeneratedVersionBuffer({
       projectId: input.projectId,
       sourcePath: input.sourcePath,
-      versionLabel: "fal-clarity-upscaler-realism-pass",
+      versionLabel: "fal-supir-realism-pass",
       bytes: generatedBytes,
     });
+
+    const totalMs = Date.now() - startedAt;
+    console.log(
+      `[fal-provider] ✓ Persisted to ${saved.filePath} (Fal ${falWallClockMs} ms, ` +
+        `total ${totalMs} ms${downscaledFrom ? `, downscaled from ${downscaledFrom.width}×${downscaledFrom.height}` : ""})`
+    );
 
     return {
       filePath: saved.filePath,
@@ -310,12 +282,11 @@ export class FalAiProvider implements ProviderAdapter {
         provider: this.name,
         model: DEFAULT_MODEL,
         promptUsed: prompt,
-        creativity,
-        resemblance: DEFAULT_RESEMBLANCE,
-        upscaleFactor: DEFAULT_UPSCALE_FACTOR,
-        inferenceSteps: steps,
-        guidanceScale: DEFAULT_GUIDANCE_SCALE,
-        seed: result.data?.seed ?? null,
+        creativitySlider: clampedCreativity,
+        sCfgEnd: supirInput.s_cfg_end,
+        upsamplingRatio: DEFAULT_UPSAMPLING_RATIO,
+        modelType: DEFAULT_MODEL_TYPE,
+        seed: result.data?.seed ?? supirInput.seed,
         timings: result.data?.timings ?? null,
         generatedUrl: generated.url,
         generatedWidth: generated.width ?? null,
@@ -323,8 +294,9 @@ export class FalAiProvider implements ProviderAdapter {
         downscaledFromWidth: downscaledFrom?.width ?? null,
         downscaledFromHeight: downscaledFrom?.height ?? null,
         requestId: result.requestId ?? null,
+        falWallClockMs,
       },
-      processingTimeMs: Date.now() - startedAt,
+      processingTimeMs: totalMs,
     };
   }
 }

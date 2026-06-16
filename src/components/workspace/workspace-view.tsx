@@ -1720,6 +1720,8 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
                         <Sparkles className="size-4" />
                         {isGenerating
                           ? `${ctaProgress}% — ${language === "hu" ? "Generálás…" : "Generating…"}`
+                          : customPromptEnabled
+                          ? (language === "hu" ? "Generálás saját prompttal" : "Generate with my prompt")
                           : (language === "hu" ? "Automatikus javítás" : "Auto enhance")}
                       </span>
                     </Button>

@@ -63,6 +63,17 @@ export class MockLocalProvider implements ProviderAdapter {
   ): Promise<ProviderGenerateResult> {
     const startedAt = Date.now();
 
+    // Loud warning: any time this method runs, the user is seeing
+    // mock sharp-filters output, NOT a real AI model. R6..R8 hid a
+    // provider-name mismatch behind this code path for several
+    // sprints; the warning makes the regression visible at the very
+    // first request.
+    console.warn(
+      `[mock-provider] ⚠ Mock realism pass running for project=${input.projectId.slice(0, 8)}… — ` +
+        `this is sharp saturation/contrast/sharpen/vignette, NOT a real AI model. ` +
+        `If you expected Fal/OpenAI, check RENDER2REAL_ACTIVE_PROVIDER and the corresponding API key.`
+    );
+
     // Simulate provider latency (~1.4s) so the workspace progress overlay
     // has time to animate during local demos.
     await sleep(350);
