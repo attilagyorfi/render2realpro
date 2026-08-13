@@ -5,44 +5,41 @@
  * eval-pipeline.js — quality measurement harness for the realism pass
  *
  * The development plan (§4.4) calls for an "eval harness on a golden set"
- * as the prerequisite for any further tuning. The point: if you cannot
- * objectively compare two pipeline configurations, "I tweaked the
- * parameters but it doesn't get better" is a guaranteed outcome. This
- * script is the measurement substrate.
+ * as the prerequisite for any tuning. If you cannot objectively compare
+ * two pipeline configurations, "I tweaked the parameters but it doesn't
+ * get better" is guaranteed. This is the measurement substrate.
  *
  * What it does:
  *   1. Reads every .png / .jpg / .jpeg / .webp under eval/golden/
- *   2. For each, runs the current Fal SDXL ControlNet Union pipeline
- *      (Canny + Depth, the recipe shipped in R11) with the parameters
- *      passed on the CLI (or the in-file defaults below).
- *   3. Writes, under eval/results/<isotimestamp>-<label>/:
- *        - <name>.input.{ext}    — copy of the source
- *        - <name>.output.jpg     — model output, downscaled to source dims
- *        - <name>.meta.json      — per-image params, timings, Fal request id
- *        - manifest.json         — run-level summary (all params + totals)
- *        - index.html            — side-by-side gallery for human review
- *   4. Prints a one-line summary per image to the terminal so you can
- *      sanity-check progress without watching the folder.
+ *   2. Runs the Fal SDXL ControlNet Union pipeline on each with the
+ *      config passed on the CLI (or the defaults below).
+ *   3. Writes eval/results/<isotimestamp>-<label>/ containing per-image
+ *      input/output/meta + manifest.json + a self-contained index.html
+ *      for side-by-side human review.
  *
- * What it does NOT do (yet):
- *   - Compute pixel-level metrics (SSIM, edge-IoU, CLIP-aesthetic). Plan
- *     §4.4 lists those as the second-stage upgrade once we are confident
- *     the side-by-side visual review is producing actionable signal.
- *   - Compare two runs automatically. Open two index.html files in two
- *     tabs for now; the manifest JSON makes it easy to script a diff
- *     later.
+ * Parameterized so experiments are cheap (Phase 0 spirit):
+ *   --controls=teed,depth   which ControlNets to drive (comma list)
+ *   --strength=0.35         img2img denoise (lower = more faithful)
+ *   --controlnet-scale=0.80 ControlNet conditioning weight (higher = tighter)
+ *   --steps=30              inference steps
+ *   --guidance=7.5          CFG scale
+ *   --prompt=fidelity       prompt set: "fidelity" (default) or "legacy"
+ *   --label=my-experiment   folder suffix + report title
+ *
+ * Supported --controls values (what the sdxl-controlnet-union endpoint
+ * actually exposes): canny, teed, depth, normal, openpose, segmentation.
+ * NOTE: lineart and mlsd are NOT available on this endpoint. TEED is the
+ * clean/soft-edge detector — the low-noise alternative to Canny for the
+ * "don't turn texture noise into fake geometry" problem.
  *
  * Usage:
  *   npm run eval
- *   npm run eval -- --strength=0.65 --label=stronger-denoise
- *   npm run eval -- --steps=18 --controlnet-scale=0.7 --label=fast-rigid
+ *   npm run eval -- --controls=teed,depth --strength=0.35 --controlnet-scale=0.80 --label=teed-s035-cn080
+ *   npm run eval -- --controls=canny,depth --strength=0.55 --label=canny-baseline
  *
- * The script intentionally duplicates fal-provider.ts's call shape rather
- * than importing it — running TypeScript via the Next.js path-alias
- * resolver inside a standalone Node script would need tsx or a build
- * step, and we want this harness to stay runnable in a fresh checkout
- * with `npm install && npm run eval`. When you change the provider,
- * update the matching section below.
+ * The script duplicates fal-provider.ts's call shape rather than
+ * importing it (standalone Node, no tsx). When a winning config is found
+ * on the golden set, promote it into fal-provider.ts in one go.
  */
 
 require("dotenv").config();
@@ -55,11 +52,81 @@ const GOLDEN_DIR = path.join(REPO_ROOT, "eval", "golden");
 const RESULTS_DIR = path.join(REPO_ROOT, "eval", "results");
 const SUPPORTED_EXT = new Set([".png", ".jpg", ".jpeg", ".webp"]);
 
+/**
+ * The exact control-image fields the fal-ai/sdxl-controlnet-union
+ * endpoint accepts. Verified against the Fal API schema — lineart, mlsd,
+ * hed, scribble are NOT on this endpoint. Each entry maps our short name
+ * to the endpoint's <name>_image_url / <name>_preprocess field pair.
+ */
+const SUPPORTED_CONTROLS = [
+  "canny",
+  "teed",
+  "depth",
+  "normal",
+  "openpose",
+  "segmentation",
+];
+
+/**
+ * Prompt sets. "legacy" is what R11/R12 shipped (scene-material heavy).
+ * "fidelity" is the render-to-real tuned set: leads with camera/optics +
+ * PBR materials, and the negative prompt is dominated by geometry-drift
+ * and CG-look bans (the biggest lever for engineering fidelity).
+ */
+const PROMPT_SETS = {
+  legacy: {
+    positive: [
+      "professional architectural exterior photography, photorealistic",
+      "shot on Hasselblad H6D-400c, 85mm prime lens, sharp focus, fine grain",
+      "weathered concrete with visible porosity, brushed aluminum sandwich panels with seam highlights, asphalt with realistic aggregate and tyre marks",
+      "blade-level grass with colour variation, real glass with subtle sky reflections",
+      "late afternoon natural sun, atmospheric haze between camera and building, soft contact shadows, ambient occlusion in eaves",
+      "ultra realistic materials, 8k resolution, masterpiece",
+    ].join(", "),
+    negative: [
+      "cgi, 3d render, computer graphics, video game, unreal engine, twinmotion, lumion",
+      "plastic, smooth surface, oversaturated, flat colours, sterile, perfect",
+      "painting, illustration, drawing, cartoon, anime, fantasy",
+      "redesigned building, deformed geometry, extra windows, missing windows",
+      "changed building shape, different roof material, repainted facade",
+      "new vehicles, new people, added decoration, removed decoration",
+      "watermark, sample text, letters, typography, logo, signature",
+      "low quality, worst quality, blurry, jpeg artifacts",
+    ].join(", "),
+  },
+  fidelity: {
+    // Camera/optics + PBR materials first — steers toward a PHOTOGRAPH of
+    // the existing structure, not a redesign.
+    positive: [
+      "hyper-realistic architectural photography, raw photo",
+      "f/8, 35mm lens, physically based rendering materials",
+      "realistic reflections, subtle dirt and weathering, highly detailed textures",
+      "concrete porosity, brushed metal, real glass, natural daylight, soft contact shadows",
+    ].join(", "),
+    // Geometry-drift + CG-look bans dominate — this is the fidelity lever.
+    negative: [
+      "altered geometry, changed structure, hallucinated details, missing windows, extra windows",
+      "distorted perspective, warped lines, deformed building",
+      "3d render, cgi, plastic materials, sketch, painting, illustration, cartoon",
+      "twinmotion, lumion, unreal engine, oversaturated, flat colours",
+      "redesigned building, different roof material, repainted facade, new vehicles, new people",
+      "watermark, sample text, letters, typography, logo, signature",
+      "low quality, worst quality, blurry, jpeg artifacts",
+    ].join(", "),
+  },
+};
+
+const PIPELINE_DEFAULTS = {
+  model: "fal-ai/sdxl-controlnet-union/image-to-image",
+  controls: ["canny", "depth"],
+  strength: 0.55,
+  controlnetScale: 0.6,
+  guidanceScale: 7.5,
+  steps: 30,
+  promptSet: "fidelity",
+};
+
 function parseArgs(argv) {
-  // Minimal CLI parser — supports --key=value and --key value forms.
-  // npm passes argv after "--" through unchanged so both work from
-  // `npm run eval -- --strength=0.65` and `node scripts/eval-pipeline.js
-  // --strength=0.65`.
   const out = {};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -80,6 +147,28 @@ function parseArgs(argv) {
   return out;
 }
 
+function resolveControls(raw) {
+  if (!raw) return PIPELINE_DEFAULTS.controls;
+  const picked = raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  const invalid = picked.filter((c) => !SUPPORTED_CONTROLS.includes(c));
+  if (invalid.length) {
+    console.error(
+      `[eval] Unsupported control(s): ${invalid.join(", ")}.\n` +
+        `[eval] This endpoint supports: ${SUPPORTED_CONTROLS.join(", ")}.\n` +
+        (invalid.includes("lineart") || invalid.includes("mlsd")
+          ? `[eval] Note: lineart/mlsd are NOT on fal-ai/sdxl-controlnet-union. ` +
+            `Use "teed" for a clean, low-noise edge control (the anti-Canny).`
+          : "")
+    );
+    process.exit(1);
+  }
+  if (picked.length === 0) return PIPELINE_DEFAULTS.controls;
+  return picked;
+}
+
 function readGoldenImages() {
   if (!fs.existsSync(GOLDEN_DIR)) {
     console.error(
@@ -93,7 +182,7 @@ function readGoldenImages() {
     .sort();
   if (files.length === 0) {
     console.error(
-      `[eval] No supported images in eval/golden/. See eval/golden/README.md for guidance on what to put there.`
+      `[eval] No supported images in eval/golden/. See eval/golden/README.md.`
     );
     process.exit(1);
   }
@@ -101,7 +190,6 @@ function readGoldenImages() {
 }
 
 function isoStamp() {
-  // 2026-06-16T16-58-12Z, filesystem-safe (no colons).
   return new Date().toISOString().replace(/[:.]/g, "-").replace(/-\d{3}/, "");
 }
 
@@ -112,41 +200,7 @@ function mimeFor(ext) {
   return "image/png";
 }
 
-/* ──────────────────────────────────────────────────────────────────────
- * Provider call. KEEP IN SYNC WITH src/services/providers/fal-provider.ts.
- * When you change parameters there, update the same fields here so the
- * harness measures the production pipeline, not a stale copy of it.
- * ────────────────────────────────────────────────────────────────────── */
-
-const PIPELINE_DEFAULTS = {
-  model: "fal-ai/sdxl-controlnet-union/image-to-image",
-  strength: 0.55,
-  controlnetScale: 0.6,
-  guidanceScale: 7.5,
-  steps: 30,
-};
-
-const POSITIVE_PROMPT = [
-  "professional architectural exterior photography, photorealistic",
-  "shot on Hasselblad H6D-400c, 85mm prime lens, sharp focus, fine grain",
-  "weathered concrete with visible porosity, brushed aluminum sandwich panels with seam highlights, asphalt with realistic aggregate and tyre marks",
-  "blade-level grass with colour variation, real glass with subtle sky reflections",
-  "late afternoon natural sun, atmospheric haze between camera and building, soft contact shadows, ambient occlusion in eaves",
-  "ultra realistic materials, 8k resolution, masterpiece",
-].join(", ");
-
-const NEGATIVE_PROMPT = [
-  "cgi, 3d render, computer graphics, video game, unreal engine, twinmotion, lumion",
-  "plastic, smooth surface, oversaturated, flat colours, sterile, perfect",
-  "painting, illustration, drawing, cartoon, anime, fantasy",
-  "redesigned building, deformed geometry, extra windows, missing windows",
-  "changed building shape, different roof material, repainted facade",
-  "new vehicles, new people, added decoration, removed decoration",
-  "watermark, sample text, letters, typography, logo, signature",
-  "low quality, worst quality, blurry, jpeg artifacts",
-].join(", ");
-
-async function runPipelineOnImage({ fal, sharp, imagePath, params }) {
+async function runPipelineOnImage({ fal, sharp, imagePath, params, prompts }) {
   const startedAt = Date.now();
   const bytes = fs.readFileSync(imagePath);
   const ext = path.extname(imagePath);
@@ -159,14 +213,20 @@ async function runPipelineOnImage({ fal, sharp, imagePath, params }) {
 
   const seed = Math.floor(Math.random() * 2 ** 31);
 
+  // Build the control fields dynamically from the selected control set.
+  // Every selected control is fed from the same source URL with its
+  // preprocessor enabled, so Fal derives the control map itself.
+  const controlFields = {};
+  for (const control of params.controls) {
+    controlFields[`${control}_image_url`] = sourceUrl;
+    controlFields[`${control}_preprocess`] = true;
+  }
+
   const input = {
     image_url: sourceUrl,
-    prompt: POSITIVE_PROMPT,
-    negative_prompt: NEGATIVE_PROMPT,
-    canny_image_url: sourceUrl,
-    canny_preprocess: true,
-    depth_image_url: sourceUrl,
-    depth_preprocess: true,
+    prompt: prompts.positive,
+    negative_prompt: prompts.negative,
+    ...controlFields,
     strength: params.strength,
     controlnet_conditioning_scale: params.controlnetScale,
     guidance_scale: params.guidanceScale,
@@ -188,8 +248,6 @@ async function runPipelineOnImage({ fal, sharp, imagePath, params }) {
   }
   const rawOut = Buffer.from(await dl.arrayBuffer());
 
-  // Resample to source dimensions so the side-by-side comparison is
-  // fair (same canvas size, only pixels differ).
   const srcMeta = await sharp(bytes).metadata();
   let outBytes = rawOut;
   let resampledFrom = null;
@@ -214,7 +272,6 @@ async function runPipelineOnImage({ fal, sharp, imagePath, params }) {
   }
 
   return {
-    input,
     output: {
       url: generated.url,
       width: generated.width ?? null,
@@ -231,14 +288,7 @@ async function runPipelineOnImage({ fal, sharp, imagePath, params }) {
   };
 }
 
-/* ──────────────────────────────────────────────────────────────────────
- * HTML report generator.
- * ────────────────────────────────────────────────────────────────────── */
-
 function buildIndexHtml({ manifest, perImage }) {
-  // Self-contained HTML — no CSS framework, no JS bundle. Two columns
-  // per row (source / output), filename + per-image timing on top of
-  // each pair, manifest params in the top banner.
   const rows = perImage
     .map(
       (img) => `
@@ -267,9 +317,9 @@ function buildIndexHtml({ manifest, perImage }) {
     :root { color-scheme: dark; }
     body { background:#0a0a0b; color:#e7e7ea; font-family:-apple-system,Segoe UI,sans-serif; margin:0; padding:24px; }
     header { border-bottom:1px solid #2a2a2f; padding-bottom:16px; margin-bottom:24px; }
-    h1 { margin:0 0 4px 0; font-size:18px; }
+    h1 { margin:0 0 8px 0; font-size:18px; }
     .params { font-family:ui-monospace,Menlo,monospace; font-size:12px; color:#9ca3af; }
-    .params code { background:#18181b; padding:2px 6px; border-radius:4px; margin-right:8px; }
+    .params code { background:#18181b; padding:2px 6px; border-radius:4px; margin-right:8px; display:inline-block; margin-bottom:4px; }
     article { border:1px solid #2a2a2f; border-radius:8px; padding:16px; margin-bottom:24px; }
     h2 { margin:0 0 8px 0; font-size:14px; font-family:ui-monospace,Menlo,monospace; }
     .meta { color:#9ca3af; font-size:12px; margin:0 0 12px 0; }
@@ -285,11 +335,12 @@ function buildIndexHtml({ manifest, perImage }) {
     <h1>Eval run — <code>${manifest.label}</code> — ${manifest.timestamp}</h1>
     <p class="params">
       <code>model=${manifest.params.model}</code>
+      <code>controls=${manifest.params.controls.join("+")}</code>
       <code>strength=${manifest.params.strength}</code>
       <code>cn-scale=${manifest.params.controlnetScale}</code>
       <code>steps=${manifest.params.steps}</code>
       <code>guidance=${manifest.params.guidanceScale}</code>
-      <code>controlnets=canny+depth</code>
+      <code>prompt=${manifest.params.promptSet}</code>
       <code>n=${perImage.length}</code>
       <code>total=${(manifest.totalWallClockMs / 1000).toFixed(1)} s</code>
       <code>avg=${Math.round(manifest.totalWallClockMs / Math.max(1, perImage.length))} ms</code>
@@ -300,10 +351,6 @@ function buildIndexHtml({ manifest, perImage }) {
 </html>`;
 }
 
-/* ──────────────────────────────────────────────────────────────────────
- * Main.
- * ────────────────────────────────────────────────────────────────────── */
-
 async function main() {
   if (!process.env.FAL_KEY) {
     console.error("[eval] FAL_KEY missing from .env. Set it before running.");
@@ -311,15 +358,25 @@ async function main() {
   }
 
   const args = parseArgs(process.argv.slice(2));
+  const promptSet = args.prompt ?? PIPELINE_DEFAULTS.promptSet;
+  if (!PROMPT_SETS[promptSet]) {
+    console.error(
+      `[eval] Unknown --prompt=${promptSet}. Available: ${Object.keys(PROMPT_SETS).join(", ")}.`
+    );
+    process.exit(1);
+  }
   const params = {
     model: args.model ?? PIPELINE_DEFAULTS.model,
+    controls: resolveControls(args.controls),
     strength: Number(args.strength ?? PIPELINE_DEFAULTS.strength),
     controlnetScale: Number(
       args["controlnet-scale"] ?? PIPELINE_DEFAULTS.controlnetScale
     ),
     guidanceScale: Number(args.guidance ?? PIPELINE_DEFAULTS.guidanceScale),
     steps: Number(args.steps ?? PIPELINE_DEFAULTS.steps),
+    promptSet,
   };
+  const prompts = PROMPT_SETS[promptSet];
   const label = (args.label ?? "default")
     .replace(/[^a-z0-9._-]/gi, "-")
     .slice(0, 40);
@@ -357,11 +414,13 @@ async function main() {
         sharp,
         imagePath,
         params,
+        prompts,
       });
       fs.writeFileSync(path.join(runDir, outputFile), r.bytes);
       const meta = {
         name: baseName,
         params,
+        promptSet,
         sourceWidth: r.sourceWidth,
         sourceHeight: r.sourceHeight,
         outputWidth: r.output.width,
@@ -394,6 +453,7 @@ async function main() {
       const errMeta = {
         name: baseName,
         params,
+        promptSet,
         error: String(err.message ?? err),
       };
       fs.writeFileSync(
@@ -420,11 +480,14 @@ async function main() {
     timestamp: ts,
     label,
     params,
+    promptSet,
     promptHashes: {
-      // Hash so manifest diffs make prompt drift obvious without
-      // embedding the whole prompt in every result folder.
-      positive: hashString(POSITIVE_PROMPT),
-      negative: hashString(NEGATIVE_PROMPT),
+      positive: hashString(prompts.positive),
+      negative: hashString(prompts.negative),
+    },
+    prompts: {
+      positive: prompts.positive,
+      negative: prompts.negative,
     },
     images: perImage.map((p) => ({
       name: p.name,
@@ -458,7 +521,6 @@ async function main() {
 }
 
 function hashString(s) {
-  // Simple non-crypto digest — enough to spot prompt drift between runs.
   let h = 5381;
   for (let i = 0; i < s.length; i++) {
     h = (h * 33) ^ s.charCodeAt(i);

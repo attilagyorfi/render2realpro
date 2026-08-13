@@ -48,9 +48,16 @@ next-env.d.ts
 # Runtime asset storage at repo root only — do NOT match src/services/storage/
 /storage/
 
-# Eval harness output (R12 / Phase 0). Source images in eval/golden/ ARE
-# tracked; only the generated result folders are ignored.
+# Eval harness (R12 / Phase 0). The golden source images are large
+# (200MB+ of PNGs) and the generated results are reproducible from the
+# harness — neither belongs in git. Only the README + .gitkeep are
+# tracked so the folder structure and usage guide survive a clone.
 /eval/results/
+/eval/golden/*
+!/eval/golden/README.md
+!/eval/golden/.gitkeep
+# Throwaway upload archive (created when zipping the golden set to share).
+/eval.zip
 
 # any local SQLite databases (legacy from the SQLite era — repo runs on Postgres now)
 *.db
