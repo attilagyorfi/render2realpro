@@ -536,12 +536,14 @@ export function WorkspaceView({ projectId }: { projectId: string }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [negativePrompt, setNegativePrompt] = useState("");
-  // Clarity Upscaler's `creativity` knob. 0.55 = the R7-recalibrated
-  // default after user feedback that 0.35 produced great lighting but
-  // visibly left materials untouched. 0.55 actually reworks textures
-  // (concrete porosity, panel seams, asphalt aggregate) without
-  // crossing the hallucination line. Slider is bounded to 0.10..0.70.
-  const [creativity, setCreativity] = useState(0.55);
+  // Denoise strength (SDXL img2img). R14 set the default to 0.35 — the
+  // render-to-real operating point where the model repaints materials
+  // (glass, metal, concrete, vegetation) but leaves door/window openings
+  // and the building outline intact. Paired in the provider with TEED
+  // clean edges + ControlNet scale 0.8. Raise toward 0.55+ only when a
+  // bolder material transform is wanted and some geometry drift is
+  // acceptable. Slider is bounded to 0.10..0.70.
+  const [creativity, setCreativity] = useState(0.35);
   const [newPresetDialogOpen, setNewPresetDialogOpen] = useState(false);
   const [newPresetName, setNewPresetName] = useState("");
   const [isSavingPreset, setIsSavingPreset] = useState(false);

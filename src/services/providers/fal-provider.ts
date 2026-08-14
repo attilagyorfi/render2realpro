@@ -14,13 +14,15 @@
  *
  *   v5 (this file) — fal-ai/sdxl-controlnet-union/image-to-image
  *        The rendair.ai recipe in turnkey form: SDXL base + multiple
- *        ControlNets (Canny for edges, Depth for geometry) + img2img.
- *        Both ControlNets feed from the SAME source URL with
- *        canny_preprocess and depth_preprocess set to true so Fal runs
- *        the preprocessors itself — we send one upload, get a dual-CN
- *        pass. This is the architectural-viz industry standard
- *        (Juggernaut XL / RealVisXL + Canny + Depth + img2img at
- *        denoise ~0.55), packaged as a single endpoint.
+ *        ControlNets + img2img, all fed from the SAME source URL with
+ *        preprocessing on, so one upload yields a true multi-ControlNet
+ *        pass. R14 tuned it for engineering fidelity per the user's
+ *        guidance: TEED (clean/soft edges, ignores render noise) + Depth
+ *        instead of Canny+Depth, denoise ~0.35 instead of ~0.55, and
+ *        ControlNet scale 0.8 instead of 0.6 — "swap materials, don't
+ *        redesign". All four knobs are env-overridable (FAL_CONTROLS,
+ *        FAL_STRENGTH via the UI slider, FAL_CONTROLNET_SCALE) so the
+ *        operating point can be A/B'd without a code change.
  *
  *   Provider class `name` stays "fal-controlnet" across every model
  *   version — provider-registry.ts and the user's .env both reference
@@ -52,14 +54,62 @@ const DEFAULT_MODEL =
   process.env.FAL_MODEL ?? "fal-ai/sdxl-controlnet-union/image-to-image";
 
 /**
- * ControlNet conditioning scale. 0.5 is Fal's documented default; 0.6
- * is firmer for the architectural use case where we cannot afford the
- * building outline to drift even slightly. Above 0.8 the result starts
- * to look "traced" — preserving edges so rigidly that the surrounding
- * denoise can't actually transform materials.
+ * Which ControlNets drive the pass. R14 switched the default from
+ * canny+depth to TEED+depth: Canny fires on every fleck of render noise,
+ * every shadow edge and blade of grass, and the model then tries to turn
+ * that noise into real geometry — the "melted / noisy detail" failure
+ * mode. TEED is a soft, clean edge detector that ignores texture noise
+ * and keeps only the true structural lines, so the building geometry is
+ * held firmly while the denoise is free to repaint materials. Depth adds
+ * 3D structure preservation on top.
+ *
+ * The endpoint only exposes: canny, teed, depth, normal, openpose,
+ * segmentation (NOT lineart/mlsd). Override via FAL_CONTROLS, e.g.
+ * FAL_CONTROLS="canny,depth" to A/B the edge detector from .env with no
+ * code change. An unknown value warns and falls back to the default.
+ */
+const SUPPORTED_CONTROLS = [
+  "canny",
+  "teed",
+  "depth",
+  "normal",
+  "openpose",
+  "segmentation",
+] as const;
+
+function resolveControls(): string[] {
+  const raw = process.env.FAL_CONTROLS ?? "teed,depth";
+  const picked = raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  const invalid = picked.filter(
+    (c) => !(SUPPORTED_CONTROLS as readonly string[]).includes(c)
+  );
+  if (invalid.length || picked.length === 0) {
+    if (invalid.length) {
+      console.warn(
+        `[fal-provider] Ignoring unsupported FAL_CONTROLS value(s): ${invalid.join(", ")}. ` +
+          `Supported: ${SUPPORTED_CONTROLS.join(", ")}. Falling back to teed,depth.`
+      );
+    }
+    return ["teed", "depth"];
+  }
+  return picked;
+}
+
+const DEFAULT_CONTROLS = resolveControls();
+
+/**
+ * ControlNet conditioning scale. Raised from 0.6 to 0.8 in R14 on the
+ * user's render-to-real fidelity guidance: at the lower denoise we now
+ * run (strength ~0.35), a firmer 0.8 forces the repainted materials to
+ * stay strictly inside the source structure instead of drifting. With
+ * TEED (clean edges) rather than Canny, 0.8 no longer risks the "traced"
+ * look Canny produced at high weight.
  */
 const DEFAULT_CONTROLNET_SCALE = Number(
-  process.env.FAL_CONTROLNET_SCALE ?? "0.6"
+  process.env.FAL_CONTROLNET_SCALE ?? "0.8"
 );
 
 /**
@@ -111,16 +161,18 @@ export class FalAiProvider implements ProviderAdapter {
     const startedAt = Date.now();
 
     // The workspace's "Kreativitás" slider (0.10..0.70 in the UI) is
-    // passed directly as the SDXL img2img `strength` — the documented
-    // denoise sweet spot for arch viz "preserve scene, transform
-    // materials" sits at 0.50..0.60 and the slider lives in that
-    // range. Fal's documented `strength` default is 0.95, which would
-    // be far too transformative (full redesign).
+    // passed directly as the SDXL img2img `strength`. R14 lowered the
+    // no-slider fallback from 0.55 to 0.35 on the render-to-real fidelity
+    // guidance: at ~0.35 the model only repaints materials (glass, metal,
+    // concrete, vegetation) while door/window openings and the building
+    // outline stay put; by 0.50+ it starts redrawing openings.
+    // Paired with the higher ControlNet scale (0.8) and TEED edges, this
+    // is the "swap materials, don't redesign" operating point.
     const settings = (input.prompt.settings ?? {}) as Record<string, unknown>;
     const rawCreativity = Number(settings.creativity);
     const strength = Number.isFinite(rawCreativity)
       ? Math.min(0.7, Math.max(0.1, rawCreativity))
-      : 0.55;
+      : 0.35;
 
     // ── 1. Read source ────────────────────────────────────────────────────
     const imageBytes = await readStoredFile(input.sourcePath);
@@ -140,20 +192,17 @@ export class FalAiProvider implements ProviderAdapter {
     );
     const sourceUrl = await fal.storage.upload(sourceFile);
 
-    // ── 3. Prompt: photograph-first pattern ──────────────────────────────
-    // The published Magnific / rendair-style positive-prompt template:
-    // lead with camera + lens + film grain (steers the model toward a
-    // PHOTOGRAPH), then list the architectural surface materials we
-    // want to see (steers the denoise to repaint THOSE surfaces), then
-    // atmosphere (light, haze, shadows). Scene nouns are deliberately
-    // avoided — they give the model permission to redesign.
+    // ── 3. Prompt: render-to-real fidelity pattern (R14) ──────────────────
+    // Camera/optics + PBR-materials first — this steers the model toward a
+    // PHOTOGRAPH of the existing structure, not a redesign. The heavy
+    // lifting for fidelity is on the NEGATIVE side below; the positive
+    // prompt just names the photographic qualities we want on the
+    // repainted surfaces. Scene nouns are avoided (they invite redesign).
     const promptParts: string[] = [
-      "professional architectural exterior photography, photorealistic",
-      "shot on Hasselblad H6D-400c, 85mm prime lens, sharp focus, fine grain",
-      "weathered concrete with visible porosity, brushed aluminum sandwich panels with seam highlights, asphalt with realistic aggregate and tyre marks",
-      "blade-level grass with colour variation, real glass with subtle sky reflections",
-      "late afternoon natural sun, atmospheric haze between camera and building, soft contact shadows, ambient occlusion in eaves",
-      "ultra realistic materials, 8k resolution, masterpiece",
+      "hyper-realistic architectural photography, raw photo",
+      "f/8, 35mm lens, physically based rendering materials",
+      "realistic reflections, subtle dirt and weathering, highly detailed textures",
+      "concrete porosity, brushed metal, real glass, natural daylight, soft contact shadows",
     ];
     if (input.prompt.presetName && input.prompt.presetName !== "custom") {
       promptParts.push(`style hint: ${input.prompt.presetName}`);
@@ -163,40 +212,44 @@ export class FalAiProvider implements ProviderAdapter {
     }
     const prompt = promptParts.join(", ");
 
-    // Negative prompt — keywords describing the INPUT (cgi, render,
-    // plastic, smooth) push the diffusion AWAY from the CG look the
-    // source has. Without these the model preserves the cg-plastic
-    // appearance because nothing told it not to.
+    // Negative prompt is the primary fidelity lever. It is dominated by
+    // geometry-drift bans (altered geometry, hallucinated details,
+    // missing/extra windows, distorted perspective) and CG-look bans
+    // (3d render, plastic, twinmotion/lumion) — the combination that
+    // keeps the structure intact while pushing away from the CG source
+    // appearance. A user-supplied negative (workspace Advanced) is
+    // prepended so it carries the most weight.
     const userNegative =
       typeof settings.negativePrompt === "string" && settings.negativePrompt.trim()
         ? `${settings.negativePrompt.trim()}, `
         : "";
     const negativePrompt =
       userNegative +
-      "cgi, 3d render, computer graphics, video game, unreal engine, twinmotion, lumion, " +
-      "plastic, smooth surface, oversaturated, flat colours, sterile, perfect, " +
-      "painting, illustration, drawing, cartoon, anime, fantasy, " +
-      "redesigned building, deformed geometry, extra windows, missing windows, " +
-      "changed building shape, different roof material, repainted facade, " +
-      "new vehicles, new people, added decoration, removed decoration, " +
+      "altered geometry, changed structure, hallucinated details, missing windows, extra windows, " +
+      "distorted perspective, warped lines, deformed building, changed building shape, " +
+      "3d render, cgi, plastic materials, sketch, painting, illustration, cartoon, " +
+      "twinmotion, lumion, unreal engine, oversaturated, flat colours, " +
+      "redesigned building, different roof material, repainted facade, new vehicles, new people, " +
       "watermark, sample text, letters, typography, logo, signature, " +
       "low quality, worst quality, blurry, jpeg artifacts";
 
     const seed = Math.floor(Math.random() * 2 ** 31);
 
-    // SDXL ControlNet Union accepts the same source image as Canny
-    // AND Depth control simultaneously. canny_preprocess / depth_preprocess
-    // set to true tells Fal to run the preprocessors itself, so we
-    // upload one image and get a true dual-ControlNet pass — the
-    // rendair-style recipe in a single HTTP round-trip.
+    // SDXL ControlNet Union accepts several control maps from the SAME
+    // source image simultaneously. For each selected control we set
+    // <name>_image_url = source and <name>_preprocess = true so Fal runs
+    // the preprocessor itself — one upload, a true multi-ControlNet pass.
+    const controlFields: Record<string, string | boolean> = {};
+    for (const control of DEFAULT_CONTROLS) {
+      controlFields[`${control}_image_url`] = sourceUrl;
+      controlFields[`${control}_preprocess`] = true;
+    }
+
     const sdxlInput = {
       image_url: sourceUrl,
       prompt,
       negative_prompt: negativePrompt,
-      canny_image_url: sourceUrl,
-      canny_preprocess: true,
-      depth_image_url: sourceUrl,
-      depth_preprocess: true,
+      ...controlFields,
       strength,
       controlnet_conditioning_scale: DEFAULT_CONTROLNET_SCALE,
       guidance_scale: DEFAULT_GUIDANCE_SCALE,
@@ -212,7 +265,7 @@ export class FalAiProvider implements ProviderAdapter {
         controlnet_conditioning_scale: sdxlInput.controlnet_conditioning_scale,
         guidance_scale: sdxlInput.guidance_scale,
         num_inference_steps: sdxlInput.num_inference_steps,
-        controlnets: "canny+depth (both from source)",
+        controlnets: `${DEFAULT_CONTROLS.join("+")} (all from source)`,
         creativity_slider: strength,
         seed: sdxlInput.seed,
         prompt_chars: prompt.length,
@@ -302,7 +355,7 @@ export class FalAiProvider implements ProviderAdapter {
         creativitySlider: strength,
         strength,
         controlnetConditioningScale: DEFAULT_CONTROLNET_SCALE,
-        controlnets: "canny+depth",
+        controlnets: DEFAULT_CONTROLS.join("+"),
         guidanceScale: DEFAULT_GUIDANCE_SCALE,
         inferenceSteps: DEFAULT_INFERENCE_STEPS,
         seed: result.data?.seed ?? sdxlInput.seed,

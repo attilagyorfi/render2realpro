@@ -116,11 +116,14 @@ const PROMPT_SETS = {
   },
 };
 
+// Defaults mirror the production fal-provider.ts operating point (R14),
+// so a bare `npm run eval` reproduces exactly what the live app does.
+// Override any knob on the CLI to run an experiment against this baseline.
 const PIPELINE_DEFAULTS = {
   model: "fal-ai/sdxl-controlnet-union/image-to-image",
-  controls: ["canny", "depth"],
-  strength: 0.55,
-  controlnetScale: 0.6,
+  controls: ["teed", "depth"],
+  strength: 0.35,
+  controlnetScale: 0.8,
   guidanceScale: 7.5,
   steps: 30,
   promptSet: "fidelity",
